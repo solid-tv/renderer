@@ -1,6 +1,6 @@
 {
-  "name": "@lightningtv/renderer",
-  "version": "3.3.2",
+  "name": "@solidtv/renderer",
+  "version": "1.0.0",
   "description": "SolidTV Renderer",
   "type": "module",
   "main": "./dist/exports/index.js",
@@ -38,12 +38,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lightning-tv/renderer.git"
+    "url": "git+https://github.com/solid-tv/renderer.git"
   },
   "sideEffects": false,
   "keywords": [
-    "Lightning",
-    "LightningJS",
+    "SolidTV",
+    "SolidJS",
     "WebGL",
     "JS",
     "WPE"
@@ -51,9 +51,9 @@
   "author": "Chris Lorenzo",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/lightning-tv/renderer/issues"
+    "url": "https://github.com/solid-tv/renderer/issues"
   },
-  "homepage": "https://github.com/lightning-tv/renderer#readme",
+  "homepage": "https://github.com/solid-tv/renderer#readme",
   "devDependencies": {
     "@types/node": "^20.19.17",
     "@typescript-eslint/eslint-plugin": "^8.44.0",

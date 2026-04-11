@@ -1,13 +1,11 @@
 <p>
-  <img src="https://assets.solidjs.com/banner?project=Library&type=@lightningtv/renderer" alt="SolidJS Renderer" />
+  <img src="https://assets.solidjs.com/banner?project=Library&type=@solidtv/renderer" alt="SolidTV Renderer" />
 </p>
 
-# Lightning 3 Renderer (Solid Fork)
+# SolidTV Renderer
 
 A powerful 2D scene renderer designed for rendering highly performant user
 interfaces on web browsers running on embedded devices using WebGL.
-
-This is a fork of the Lightning 3 Renderer designed to optimize performance and garbage collection that works best when combined with [SolidJS](https://github.com/lightning-tv/solid). The goal of this project is to remain compatible with the LightningJS Renderer but with enhanced performance.
 
 ## Setup & Commands
 
@@ -41,7 +39,7 @@ pnpm start:prod
 
 ## Browser Targets
 
-The Lightning 3 Renderer's goal is to work with the following browser versions and above:
+The SolidTV Renderer's goal is to work with the following browser versions and above:
 
 - Chrome v38 (Released October 7, 2014)
 
@@ -62,8 +60,6 @@ The Example Tests can be launched with:
 ```
 pnpm start
 ```
-
-A hosted version can be found [here](https://lightning-js.github.io/renderer/).
 
 This supports modern browsers as well as Chrome 38 and above through a legacy build.
 
@@ -102,13 +98,13 @@ and SDF fonts (SdfTrFontFace). Install that fonts that your applications needs
 at start up so they are ready when your application is rendered.
 
 ```ts
-import { RendererMain } from '@lightningjs/renderer';
+import { RendererMain } from '@solidtv/renderer';
 
 import {
   WebGlCoreRenderer,
   SdfTextRenderer,
-} from '@lightningjs/renderer/webgl';
-import { CanvasTextRenderer } from '@lightningjs/renderer/canvas';
+} from '@solidtv/renderer/webgl';
+import { CanvasTextRenderer } from '@solidtv/renderer/canvas';
 
 const renderer = new RendererMain(
   {
