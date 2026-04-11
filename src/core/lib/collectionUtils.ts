@@ -1,0 +1,99 @@
+import type { CoreNode } from '../CoreNode.js';
+
+//Bucket sort implementation for sorting CoreNode arrays by zIndex
+export const bucketSortByZIndex = (nodes: CoreNode[], min: number): void => {
+  const buckets: CoreNode[][] = [];
+  const bucketIndices: number[] = [];
+  //distribute nodes into buckets
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]!;
+    const index = node.props.zIndex - min;
+    //create bucket if it doesn't exist
+    if (buckets[index] === undefined) {
+      buckets[index] = [];
+      bucketIndices.push(index);
+    }
+    buckets[index]!.push(node);
+  }
+
+  //sort each bucket using insertion sort
+  for (let i = 1; i < bucketIndices.length; i++) {
+    const key = bucketIndices[i]!;
+    let j = i - 1;
+    while (j >= 0 && bucketIndices[j]! > key) {
+      bucketIndices[j + 1] = bucketIndices[j]!;
+      j--;
+    }
+    bucketIndices[j + 1] = key;
+  }
+
+  //flatten buckets
+  let idx = 0;
+  for (let i = 0; i < bucketIndices.length; i++) {
+    const bucket = buckets[bucketIndices[i]!]!;
+    for (let j = 0; j < bucket.length; j++) {
+      nodes[idx++] = bucket[j]!;
+    }
+  }
+
+  //clean up
+  buckets.length = 0;
+  bucketIndices.length = 0;
+};
+
+export const incrementalRepositionByZIndex = (
+  changedNodes: CoreNode[],
+  nodes: CoreNode[],
+): void => {
+  for (let i = 0; i < changedNodes.length; i++) {
+    const node = changedNodes[i]!;
+    const currentIndex = findChildIndexById(node, nodes);
+    if (currentIndex === -1) continue;
+
+    const targetZIndex = node.props.zIndex;
+
+    //binary search for correct insertion position
+    let left = 0;
+    let right = nodes.length;
+
+    while (left < right) {
+      const mid = (left + right) >>> 1;
+      if (nodes[mid]!.props.zIndex <= targetZIndex) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+
+    //adjust target position if it's after the current position
+    const targetIndex = left > currentIndex ? left - 1 : left;
+
+    //only reposition if target is different from current
+    if (targetIndex !== currentIndex) {
+      nodes.splice(currentIndex, 1);
+      nodes.splice(targetIndex, 0, node);
+    }
+  }
+};
+
+export const findChildIndexById = (
+  node: CoreNode,
+  children: CoreNode[],
+): number => {
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]!;
+
+    // @ts-ignore - accessing protected property
+    if (child._id === node._id) {
+      return i;
+    }
+  }
+  return -1;
+};
+
+export const removeChild = (node: CoreNode, children: CoreNode[]): void => {
+  const index = findChildIndexById(node, children);
+  if (index !== -1) {
+    children.splice(index, 1);
+  }
+};

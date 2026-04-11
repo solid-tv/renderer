@@ -1,0 +1,394 @@
+import type { CoreTextureManager } from '../CoreTextureManager.js';
+import { Texture, TextureType, type TextureData } from './Texture.js';
+import {
+  isCompressedTextureContainer,
+  loadCompressedTexture,
+} from '../lib/textureCompression.js';
+import {
+  convertUrlToAbsolute,
+  dataURIToBlob,
+  isBase64Image,
+} from '../lib/utils.js';
+import { isSvgImage, loadSvg } from '../lib/textureSvg.js';
+import { fetchJson } from '../lib/utils.js';
+import type { Platform } from '../platforms/Platform.js';
+import {
+  ENABLE_COMPRESSED_TEXTURES,
+  isProductionEnvironment,
+} from '../../utils.js';
+
+/**
+ * Properties of the {@link ImageTexture}
+ */
+export interface ImageTextureProps {
+  /**
+   * Source URL or ImageData for the image to be used as a texture.
+   *
+   * @remarks
+   * The ImageData type is currently only supported internally. End users should
+   * only set this property to a URL string.
+   *
+   * @default ''
+   */
+  src?: string | Blob | ImageData | (() => ImageData | null);
+  /**
+   * Whether to premultiply the alpha channel into the color channels of the
+   * image.
+   *
+   * @remarks
+   * Generally this should be set to `true` (the default). However, if the
+   * texture's associated Shader expects straight (non-premultiplied) colors,
+   * this should be set to `false`.
+   *
+   * @default true
+   */
+  premultiplyAlpha?: boolean | null;
+  /**
+   * `ImageData` textures are not cached unless a `key` is provided
+   */
+  key?: string | null;
+  /**
+   * Width of the image to be used as a texture. If not provided, the image's
+   * natural width will be used.
+   */
+  w?: number | null;
+  /**
+   * Height of the image to be used as a texture. If not provided, the image's
+   * natural height will be used.
+   */
+  h?: number | null;
+  /**
+   * Type, indicate an image type for overriding type detection
+   *
+   * @default null
+   */
+  type?: 'regular' | 'compressed' | 'svg' | null;
+  /**
+   * The width of the rectangle from which the ImageBitmap will be extracted. This value
+   * can be negative. Only works when createImageBitmap is supported on the browser.
+   *
+   * @default null
+   */
+  sw?: number | null;
+  /**
+   * The height of the rectangle from which the ImageBitmap will be extracted. This value
+   * can be negative. Only works when createImageBitmap is supported on the browser.
+   *
+   * @default null
+   */
+  sh?: number | null;
+  /**
+   * The y coordinate of the reference point of the rectangle from which the ImageBitmap
+   * will be extracted. Only used when `sw` and `sh` are provided. And only works when
+   * createImageBitmap is available.
+   *
+   * @default null
+   */
+  sx?: number | null;
+  /**
+   * The x coordinate of the reference point of the rectangle from which the
+   * ImageBitmap will be extracted. Only used when source `sw` width and `sh` height
+   * are provided. Only works when createImageBitmap is supported on the browser.
+   *
+   * @default null
+   */
+  sy?: number | null;
+  /**
+   * Maximum number of times to retry loading the image if it fails.
+   *
+   * @default 5
+   */
+  maxRetryCount?: number;
+}
+
+/**
+ * Texture consisting of an image loaded from a URL
+ *
+ * @remarks
+ * The ImageTexture's {@link ImageTextureProps.src} prop defines the image URL
+ * to be downloaded.
+ *
+ * By default, the texture's alpha values will be premultiplied into its color
+ * values which is generally the desired setting before they are sent to the
+ * texture's associated {@link Shader}. However, in special cases you may want
+ * the Shader to receive straight (non-premultiplied) values. In that case you
+ * can disable the default behavior by setting the
+ * {@link ImageTextureProps.premultiplyAlpha} prop to `false`.
+ */
+export class ImageTexture extends Texture {
+  private platform: Platform;
+
+  public props: Required<ImageTextureProps>;
+  public override type: TextureType = TextureType.image;
+
+  constructor(
+    txManager: CoreTextureManager,
+    props: Required<ImageTextureProps>,
+  ) {
+    super(txManager);
+
+    this.platform = txManager.platform;
+    this.props = props;
+    this.maxRetryCount = props.maxRetryCount as number;
+  }
+
+  hasAlphaChannel(mimeType: string) {
+    return mimeType.indexOf('image/png') !== -1;
+  }
+
+  async loadImageFallback(src: string | Blob, hasAlpha: boolean) {
+    const img = new Image();
+
+    if (typeof src === 'string' && isBase64Image(src) === false) {
+      img.crossOrigin = 'anonymous';
+    }
+
+    return new Promise<{
+      data: HTMLImageElement | null;
+      premultiplyAlpha: boolean;
+    }>((resolve, reject) => {
+      img.onload = () => {
+        resolve({ data: img, premultiplyAlpha: hasAlpha });
+      };
+
+      img.onerror = (err) => {
+        const errorMessage =
+          err instanceof Error
+            ? err.message
+            : err instanceof Event
+            ? `Image loading failed for ${img.src}`
+            : 'Unknown image loading error';
+        reject(new Error(`Image loading failed: ${errorMessage}`));
+      };
+
+      if (src instanceof Blob) {
+        img.src = URL.createObjectURL(src);
+      } else {
+        img.src = src;
+      }
+    });
+  }
+
+  async createImageBitmap(
+    blob: Blob,
+    premultiplyAlpha: boolean | null,
+    sx: number | null,
+    sy: number | null,
+    sw: number | null,
+    sh: number | null,
+  ): Promise<{
+    data: ImageBitmap | HTMLImageElement;
+    premultiplyAlpha: boolean;
+  }> {
+    const hasAlphaChannel = premultiplyAlpha ?? blob.type.includes('image/png');
+    const imageBitmapSupported = this.txManager.imageBitmapSupported;
+
+    if (imageBitmapSupported.full === true && sw !== null && sh !== null) {
+      // createImageBitmap with crop
+      const bitmap = await this.platform.createImageBitmap(
+        blob,
+        sx || 0,
+        sy || 0,
+        sw,
+        sh,
+        {
+          premultiplyAlpha: hasAlphaChannel ? 'premultiply' : 'none',
+          colorSpaceConversion: 'none',
+          imageOrientation: 'none',
+        },
+      );
+      return { data: bitmap, premultiplyAlpha: hasAlphaChannel };
+    } else if (imageBitmapSupported.basic === true) {
+      // basic createImageBitmap without options or crop
+      // this is supported for Chrome v50 to v52/54 that doesn't support options
+      return {
+        data: await this.platform.createImageBitmap(blob),
+        premultiplyAlpha: hasAlphaChannel,
+      };
+    }
+
+    // default createImageBitmap without crop but with options
+    const bitmap = await this.platform.createImageBitmap(blob, {
+      premultiplyAlpha: hasAlphaChannel ? 'premultiply' : 'none',
+      colorSpaceConversion: 'none',
+      imageOrientation: 'none',
+    });
+    return { data: bitmap, premultiplyAlpha: hasAlphaChannel };
+  }
+
+  async loadImage(src: string) {
+    const { premultiplyAlpha, sx, sy, sw, sh } = this.props;
+
+    if (this.txManager.hasCreateImageBitmap === true) {
+      if (
+        isBase64Image(src) === false &&
+        this.txManager.hasWorker === true &&
+        this.txManager.imageWorkerManager !== null
+      ) {
+        return this.txManager.imageWorkerManager.getImage(
+          src,
+          premultiplyAlpha,
+          sx,
+          sy,
+          sw,
+          sh,
+        );
+      }
+
+      let blob;
+
+      if (isBase64Image(src) === true) {
+        blob = dataURIToBlob(src);
+      } else {
+        blob = await fetchJson(src, 'blob').then(
+          (response) => response as Blob,
+        );
+      }
+
+      return this.createImageBitmap(blob, premultiplyAlpha, sx, sy, sw, sh);
+    }
+
+    return this.loadImageFallback(src, premultiplyAlpha ?? true);
+  }
+
+  override async getTextureSource(): Promise<TextureData> {
+    let resp: TextureData;
+    try {
+      resp = await this.determineImageTypeAndLoadImage();
+    } catch (e) {
+      this.setState('failed', e as Error);
+
+      return {
+        data: null,
+      };
+    }
+
+    if (resp.data === null) {
+      this.setState('failed', Error('ImageTexture: No image data'));
+      return {
+        data: null,
+      };
+    }
+
+    return {
+      data: resp.data,
+      premultiplyAlpha: this.props.premultiplyAlpha ?? true,
+    };
+  }
+
+  determineImageTypeAndLoadImage() {
+    const { src, premultiplyAlpha, type } = this.props;
+    if (src === null) {
+      return {
+        data: null,
+      };
+    }
+
+    if (typeof src !== 'string') {
+      if (src instanceof Blob) {
+        if (this.txManager.hasCreateImageBitmap === true) {
+          const { sx, sy, sw, sh } = this.props;
+          return this.createImageBitmap(src, premultiplyAlpha, sx, sy, sw, sh);
+        } else {
+          return this.loadImageFallback(src, premultiplyAlpha ?? true);
+        }
+      }
+      if (src instanceof ImageData) {
+        return {
+          data: src,
+          premultiplyAlpha,
+        };
+      }
+      return {
+        data: src(),
+        premultiplyAlpha,
+      };
+    }
+
+    const absoluteSrc = convertUrlToAbsolute(src);
+    if (type === 'regular') {
+      return this.loadImage(absoluteSrc);
+    }
+
+    if (type === 'svg') {
+      return loadSvg(
+        absoluteSrc,
+        this.props.w,
+        this.props.h,
+        this.props.sx,
+        this.props.sy,
+        this.props.sw,
+        this.props.sh,
+      );
+    }
+
+    if (isSvgImage(src) === true) {
+      return loadSvg(
+        absoluteSrc,
+        this.props.w,
+        this.props.h,
+        this.props.sx,
+        this.props.sy,
+        this.props.sw,
+        this.props.sh,
+      );
+    }
+
+    if (
+      ENABLE_COMPRESSED_TEXTURES &&
+      (type === 'compressed' || isCompressedTextureContainer(src) === true)
+    ) {
+      return loadCompressedTexture(absoluteSrc);
+    }
+
+    // default
+    return this.loadImage(absoluteSrc);
+  }
+
+  /**
+   * Generates a cache key for the ImageTexture based on the provided props.
+   * @param props - The props used to generate the cache key.
+   * @returns The cache key as a string, or `false` if the key cannot be generated.
+   */
+  static override makeCacheKey(props: ImageTextureProps): string | false {
+    // Only cache key-able textures; prioritise key
+    const key = props.key || props.src;
+    if (typeof key !== 'string') {
+      return false;
+    }
+
+    let cacheKey = `ImageTexture,${key},${props.premultiplyAlpha ?? 'true'},${
+      props.maxRetryCount
+    }`;
+
+    if (props.sh !== null && props.sw !== null) {
+      cacheKey += ',';
+      cacheKey += props.sx ?? '';
+      cacheKey += props.sy ?? '';
+      cacheKey += props.sw || '';
+      cacheKey += props.sh || '';
+    }
+
+    return cacheKey;
+  }
+
+  static override resolveDefaults(
+    props: ImageTextureProps,
+  ): Required<ImageTextureProps> {
+    return {
+      src: props.src ?? '',
+      premultiplyAlpha: props.premultiplyAlpha ?? true, // null,
+      key: props.key ?? null,
+      type: props.type ?? null,
+      w: props.w ?? null,
+      h: props.h ?? null,
+      sx: props.sx ?? null,
+      sy: props.sy ?? null,
+      sw: props.sw ?? null,
+      sh: props.sh ?? null,
+      maxRetryCount: props.maxRetryCount ?? 5,
+    };
+  }
+
+  static z$__type__Props: ImageTextureProps;
+}

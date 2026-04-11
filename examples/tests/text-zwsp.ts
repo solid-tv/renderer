@@ -1,0 +1,110 @@
+import type { ExampleSettings } from '../common/ExampleSettings.js';
+
+export async function automation(settings: ExampleSettings) {
+  const next = await test(settings);
+  await settings.snapshot();
+  while (await next()) {
+    await settings.snapshot();
+  }
+}
+
+/**
+ * This test is to ensure that both the canvas text renderer and the sdf text
+ * renderer correctly support zero-width space (ZWSP) for text line-breaking.
+ *
+ * Two text nodes are created with ZWSP inserted between words to test if the
+ * line breaks appropriately without visible gaps or extra spaces.
+ *
+ * Expected results: The two text nodes should break lines where ZWSP is inserted,
+ * without any extra spaces, gaps, or visible issues.
+ *
+ * Press the right arrow key to cycle through the different ZWSP test cases.
+ *
+ * @param param0
+ * @returns
+ */
+export default async function test({ renderer, testRoot }: ExampleSettings) {
+  const fontFamily = 'Ubuntu';
+  const fontSize = 40;
+  const yPos = 0;
+  testRoot.w = 500;
+  testRoot.h = 500;
+  testRoot.clipping = true;
+  testRoot.color = 0xffffffff;
+
+  const canvasText = renderer.createTextNode({
+    y: yPos,
+    maxWidth: testRoot.w,
+    fontSize,
+    fontFamily,
+    color: 0xff0000ff,
+    textRendererOverride: 'canvas',
+    parent: testRoot,
+  });
+
+  const sdfText = renderer.createTextNode({
+    y: yPos,
+    maxWidth: testRoot.w,
+    fontSize,
+    fontFamily,
+    color: 0x0000ff77,
+    parent: testRoot,
+    zIndex: 3,
+  });
+  const indexInfo = renderer.createTextNode({
+    x: testRoot.w,
+    y: testRoot.h,
+    mount: 1,
+    color: 0x000000ff,
+    fontFamily: 'Ubuntu',
+    fontSize: 20,
+    text: '1',
+    parent: testRoot,
+  });
+
+  let i = 0;
+  const ZWSP = '\u200B';
+  const mutations = [
+    () => {
+      canvasText.text =
+        sdfText.text = `This${ZWSP}is${ZWSP}a${ZWSP}test${ZWSP}with${ZWSP}ZWSP${ZWSP}between${ZWSP}words.`;
+    },
+    () => {
+      canvasText.text =
+        sdfText.text = `Testing${ZWSP}the${ZWSP}line${ZWSP}break${ZWSP}capability${ZWSP}with${ZWSP}multiple${ZWSP}words.`;
+    },
+    () => {
+      canvasText.text =
+        sdfText.text = `Short${ZWSP}text${ZWSP}with${ZWSP}ZWSP.`;
+    },
+  ];
+
+  /**
+   * Run the next mutation in the list
+   *
+   * @param idx
+   * @returns `false` if loop is set to false and we've already gone through all mutations. Otherwise `true`.
+   */
+  async function next(loop = false, idx = i + 1): Promise<boolean> {
+    if (idx > mutations.length - 1) {
+      if (!loop) {
+        return false;
+      }
+      idx = 0;
+    }
+    i = idx;
+    mutations[i]?.();
+    indexInfo.text = (i + 1).toString();
+    return true;
+  }
+  await next(false, 0);
+
+  window.addEventListener('keydown', (event) => {
+    // When right arrow is pressed, call next
+    if (event.key === 'ArrowRight') {
+      next(true).catch(console.error);
+    }
+  });
+
+  return next;
+}

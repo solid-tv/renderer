@@ -1,0 +1,288 @@
+import {
+  type INode,
+  type Dimensions,
+  type NodeLoadedEventHandler,
+  type NodeFailedEventHandler,
+} from '@lightningjs/renderer';
+import rockoImg from '../assets/rocko.png';
+import elevatorImg from '../assets/elevator.png';
+import spritemap from '../assets/spritemap.png';
+import type { ExampleSettings } from '../common/ExampleSettings.js';
+
+export async function automation(settings: ExampleSettings) {
+  await test(settings);
+  await settings.snapshot();
+}
+
+export default async function test({ renderer, testRoot }: ExampleSettings) {
+  const FONT_SIZE = 45;
+  const BEGIN_Y = FONT_SIZE;
+
+  const header = renderer.createTextNode({
+    fontFamily: 'Ubuntu',
+    text: `Texture Test`,
+    fontSize: FONT_SIZE,
+    parent: testRoot,
+  });
+
+  let curX = 0;
+  let curY = BEGIN_Y;
+  let curTest = 1;
+
+  const rocko = renderer.createNode({
+    x: curX,
+    y: curY,
+    src: rockoImg,
+    parent: testRoot,
+  });
+
+  await execLoadingTest(rocko, 181, 218);
+
+  // Test: Make sure events are still sent for textures that have been previously
+  // loaded
+
+  const rocko2 = renderer.createNode({
+    x: curX,
+    y: curY,
+    src: rockoImg,
+    parent: testRoot,
+  });
+
+  await execLoadingTest(rocko2, 181, 218);
+
+  const elevator = renderer.createNode({
+    x: curX,
+    y: curY,
+    src: elevatorImg,
+    parent: testRoot,
+  });
+
+  await execLoadingTest(elevator, 200, 268);
+
+  // // Test: Check that we capture a texture load failure
+  const failure = renderer.createNode({
+    x: curX,
+    y: curY,
+    src: 'does-not-exist.png',
+    parent: testRoot,
+  });
+
+  await execFailureTest(failure);
+
+  // // Test: Check that we capture a texture load failure
+  const failure2 = renderer.createNode({
+    x: curX,
+    y: curY,
+    src: 'does-not-exist.png',
+    parent: testRoot,
+  });
+
+  await execFailureTest(failure2);
+
+  // // Test: NoiseTexture
+
+  curX = renderer.settings.appWidth / 2;
+  curY = BEGIN_Y;
+
+  const noiseTexture = renderer.createTexture('NoiseTexture', {
+    w: 100,
+    h: 100,
+  });
+
+  const noise = renderer.createNode({
+    x: curX,
+    y: curY,
+    texture: noiseTexture,
+    parent: testRoot,
+  });
+
+  await execLoadingTest(noise, 100, 100);
+
+  // Test: NoiseTexture 2
+  const noise2 = renderer.createNode({
+    x: curX,
+    y: curY,
+    texture: noiseTexture,
+    parent: testRoot,
+  });
+
+  await execLoadingTest(noise2, 100, 100);
+
+  // Test: SubTexture Load
+  const spriteMapTexture = renderer.createTexture('ImageTexture', {
+    src: spritemap,
+  });
+
+  const frames = Array.from(Array(32).keys()).map((i) => {
+    const x = (i % 8) * 100;
+    const y = Math.floor(i / 8) * 150;
+    return renderer.createTexture('SubTexture', {
+      texture: spriteMapTexture,
+      x,
+      y,
+      w: 100,
+      h: 150,
+    });
+  });
+
+  const subTextureNode = renderer.createNode({
+    x: curX,
+    y: curY,
+    texture: frames[0],
+    parent: testRoot,
+  });
+
+  await execLoadingTest(subTextureNode, 100, 150);
+
+  // Test: SubTexture Load 2
+  const subTextureNode2 = renderer.createNode({
+    x: curX,
+    y: curY,
+    texture: frames[0],
+    parent: testRoot,
+  });
+
+  await execLoadingTest(subTextureNode2, 100, 150);
+
+  // Test: SubTetxure Failure
+  const failureTexture = renderer.createTexture('ImageTexture', {
+    src: 'does-not-exist.png',
+  });
+
+  const failureFrames = Array.from(Array(32).keys()).map((i) => {
+    const x = (i % 8) * 120;
+    const y = Math.floor(i / 8) * 120;
+    return renderer.createTexture('SubTexture', {
+      texture: failureTexture,
+      x,
+      y,
+      w: 120,
+      h: 120,
+    });
+  });
+
+  const subTxFailure = renderer.createNode({
+    x: curX,
+    y: curY,
+    texture: failureFrames[0],
+    parent: testRoot,
+  });
+
+  await execFailureTest(subTxFailure);
+
+  // Test: SubTexture Failure 2
+
+  const subTxFailure2 = renderer.createNode({
+    x: curX,
+    y: curY,
+    texture: failureFrames[0],
+    parent: testRoot,
+  });
+
+  await execFailureTest(subTxFailure2);
+
+  function waitForTxLoaded(imgNode: INode) {
+    return new Promise<Dimensions>((resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error('TIMEOUT'));
+      }, 1000);
+      imgNode.once('loaded', ((target, payload) => {
+        resolve(payload.dimensions);
+      }) satisfies NodeLoadedEventHandler);
+    });
+  }
+
+  function waitForTxFailed(imgNode: INode) {
+    return new Promise<boolean>((resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error('TIMEOUT'));
+      }, 1000);
+      imgNode.once('failed', (() => {
+        resolve(true);
+      }) satisfies NodeFailedEventHandler);
+    });
+  }
+
+  async function execLoadingTest(
+    imgNode: INode,
+    expectedWidth: number,
+    expectedHeight: number,
+  ) {
+    const textNode = renderer.createTextNode({
+      fontFamily: 'Ubuntu',
+      x: curX,
+      text: '',
+      fontSize: FONT_SIZE,
+      parent: testRoot,
+    });
+
+    let exception: string | false = false;
+    let dimensions: Dimensions = { w: 0, h: 0 };
+    try {
+      dimensions = await waitForTxLoaded(imgNode);
+    } catch (e: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+      exception = (e as any)?.message ?? 'Unknown';
+    }
+
+    imgNode.w = dimensions.w;
+    imgNode.h = dimensions.h;
+
+    textNode.y = imgNode.y + imgNode.h;
+    let result = 'Fail';
+    let expectedPostfix = '';
+    if (
+      !exception &&
+      imgNode.w === expectedWidth &&
+      imgNode.h === expectedHeight
+    ) {
+      textNode.color = 0x00ff00ff;
+      result = 'Pass';
+    } else {
+      textNode.color = 0xff0000ff;
+      if (exception) {
+        expectedPostfix = ` (exception: ${exception})`;
+      } else {
+        expectedPostfix = ` (expected ${expectedWidth}x${expectedHeight})`;
+      }
+    }
+    textNode.text = `${curTest}. Loaded Event Test: ${result} (${imgNode.w}x${imgNode.h})${expectedPostfix}`;
+    curY = textNode.y + FONT_SIZE;
+    curTest++;
+  }
+
+  async function execFailureTest(imgNode: INode) {
+    const textNode = renderer.createTextNode({
+      fontFamily: 'Ubuntu',
+      x: curX,
+      text: '',
+      fontSize: FONT_SIZE,
+      parent: testRoot,
+    });
+
+    let failureTestPass = false;
+    let exception: string | false = false;
+    try {
+      failureTestPass = await waitForTxFailed(imgNode);
+    } catch (e: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+      exception = (e as any)?.message ?? 'Unknown';
+    }
+
+    textNode.y = imgNode.y + imgNode.h;
+    let result = '';
+    if (!exception && failureTestPass) {
+      textNode.color = 0x00ff00ff;
+      result = 'Pass';
+    } else {
+      textNode.color = 0xff0000ff;
+      result = 'Fail';
+      if (exception) {
+        result += ` (exception: ${exception})`;
+      }
+    }
+    textNode.text = `${curTest}. Failure Event Test: ${result}`;
+    curY = textNode.y + FONT_SIZE;
+    curTest++;
+  }
+}

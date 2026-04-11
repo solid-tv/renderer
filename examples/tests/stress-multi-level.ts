@@ -1,0 +1,70 @@
+import { type INode } from '@lightningjs/renderer';
+import logo from '../assets/lightning.png';
+import type { ExampleSettings } from '../common/ExampleSettings.js';
+
+const randomIntBetween = (from: number, to: number) =>
+  Math.floor(Math.random() * (to - from + 1) + from);
+
+export default async function ({
+  renderer,
+  testRoot,
+  perfMultiplier,
+}: ExampleSettings) {
+  // create nodes
+  const numOuterNodes = 100 * perfMultiplier;
+  const nodes: INode[] = [];
+  let totalNodes = 0;
+
+  const bg = renderer.createNode({
+    w: 1920,
+    h: 1080,
+    color: 0xff1e293b,
+    parent: testRoot,
+  });
+
+  for (let i = 0; i < numOuterNodes; i++) {
+    const container = renderer.createNode({
+      x: Math.random() * 1920,
+      y: Math.random() * 1080,
+      parent: bg,
+    });
+    const node = renderer.createNode({
+      w: 505,
+      h: 101,
+      src: logo,
+      parent: container,
+    });
+
+    nodes.push(container);
+    totalNodes += 2;
+  }
+
+  console.log(
+    `Created ${numOuterNodes} outer nodes with another node nested inside. Total nodes: ${totalNodes}`,
+  );
+
+  // create 100 animations
+  const animate = () => {
+    nodes.forEach((node) => {
+      node
+        .animate(
+          {
+            x: randomIntBetween(20, 1740),
+            y: randomIntBetween(20, 900),
+            rotation: Math.random() * Math.PI,
+          },
+          {
+            duration: 3000,
+            easing: 'ease-out',
+            loop: true,
+            stopMethod: 'reverse',
+          },
+        )
+        .start();
+    });
+  };
+
+  animate();
+
+  // setInterval(animate, 3000);
+}

@@ -1,0 +1,34 @@
+{
+  "name": "examples",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "start": "concurrently -c \"auto\" \"pnpm:watch:renderer\" \"pnpm:dev\"",
+    "start:prod": "concurrently -c \"auto\" \"pnpm:watch:renderer\" \"pnpm:watch\" \"sleep 5 && pnpm preview\"",
+    "dev": "vite --open --host",
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "watch-all": "concurrently -c \"auto\" \"pnpm:watch:renderer\" \"pnpm:watch\"",
+    "preview": "vite preview --host --open",
+    "preview:automation": "vite preview",
+    "build:renderer": "cd .. && pnpm build",
+    "watch:renderer": "cd .. && pnpm watch"
+  },
+  "author": "Frank Weindel",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@lightningjs/renderer": "link:..",
+    "@stdlib/random-base-mt19937": "^0.2.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-legacy": "^5.4.2",
+    "vite": "^5.4.8",
+    "whatwg-fetch": "^3.6.2"
+  },
+  "engines": {
+    "npm": "please-use-pnpm"
+  }
+}

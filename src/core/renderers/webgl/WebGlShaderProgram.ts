@@ -1,0 +1,346 @@
+import type { WebGlContextWrapper } from '../../lib/WebGlContextWrapper.js';
+import { USE_RTT } from '../../../utils.js';
+import { Default } from '../../shaders/webgl/Default.js';
+import type { CoreShaderProgram } from '../CoreShaderProgram.js';
+import type { WebGlCtxTexture } from './WebGlCtxTexture.js';
+import type { WebGlRenderer, WebGlRenderOp } from './WebGlRenderer.js';
+import type { WebGlShaderType } from './WebGlShaderNode.js';
+import { WebGlShaderNode } from './WebGlShaderNode.js';
+import type { BufferCollection } from './internal/BufferCollection.js';
+import {
+  createProgram,
+  createShader,
+  type UniformSet1Param,
+  type UniformSet2Params,
+  type UniformSet3Params,
+  type UniformSet4Params,
+} from './internal/ShaderUtils.js';
+import { CoreNode } from '../../CoreNode.js';
+
+export class WebGlShaderProgram implements CoreShaderProgram {
+  protected program: WebGLProgram | null;
+  /**
+   * Vertex Array Object
+   *
+   * @remarks
+   * Used by WebGL2 Only
+   */
+  protected vao: WebGLVertexArrayObject | undefined;
+  protected renderer: WebGlRenderer;
+  protected glw: WebGlContextWrapper;
+  protected attributeLocations: string[];
+  protected uniformLocations: Record<string, WebGLUniformLocation> | null;
+  protected lifecycle: Pick<WebGlShaderType, 'update' | 'canBatch'>;
+  protected useSystemAlpha = false;
+  protected useSystemDimensions = false;
+  protected useTimeValue = false;
+  public isDestroyed = false;
+  supportsIndexedTextures = false;
+
+  constructor(
+    renderer: WebGlRenderer,
+    config: WebGlShaderType,
+    resolvedProps: Record<string, any>,
+  ) {
+    this.renderer = renderer;
+    const glw = (this.glw = renderer.glw);
+
+    // Check that extensions are supported
+    const webGl2 = glw.isWebGl2();
+    let requiredExtensions: string[] = [];
+
+    this.supportsIndexedTextures =
+      config.supportsIndexedTextures || this.supportsIndexedTextures;
+    requiredExtensions =
+      (webGl2 && config.webgl2Extensions) ||
+      (!webGl2 && config.webgl1Extensions) ||
+      [];
+
+    const glVersion = webGl2 ? '2.0' : '1.0';
+    requiredExtensions.forEach((extensionName) => {
+      if (!glw.getExtension(extensionName)) {
+        throw new Error(
+          `Shader "${this.constructor.name}" requires extension "${extensionName}" for WebGL ${glVersion} but wasn't found`,
+        );
+      }
+    });
+
+    let vertexSource =
+      config.vertex instanceof Function
+        ? config.vertex(renderer, resolvedProps)
+        : config.vertex;
+
+    if (vertexSource === undefined) {
+      vertexSource = Default.vertex as string;
+    }
+
+    const fragmentSource =
+      config.fragment instanceof Function
+        ? config.fragment(renderer, resolvedProps)
+        : config.fragment;
+
+    const vertexShader = createShader(glw, glw.VERTEX_SHADER, vertexSource);
+    if (!vertexShader) {
+      throw new Error('Vertex shader creation failed');
+    }
+
+    const fragmentShader = createShader(
+      glw,
+      glw.FRAGMENT_SHADER,
+      fragmentSource,
+    );
+
+    if (!fragmentShader) {
+      throw new Error('fragment shader creation failed');
+    }
+
+    const program = createProgram(glw, vertexShader, fragmentShader);
+    if (!program) {
+      throw new Error();
+    }
+
+    this.program = program;
+    this.attributeLocations = glw.getAttributeLocations(program);
+
+    const uniLocs = (this.uniformLocations = glw.getUniformLocations(program));
+
+    this.useSystemAlpha = uniLocs['u_alpha'] !== undefined;
+    this.useSystemDimensions = uniLocs['u_dimensions'] !== undefined;
+
+    this.useTimeValue =
+      this.glw.getUniformLocation(program, 'u_dimensions') !== null &&
+      config.time !== undefined;
+
+    this.lifecycle = {
+      update: config.update,
+      canBatch: config.canBatch,
+    };
+  }
+
+  disableAttribute(location: number) {
+    this.glw.disableVertexAttribArray(location);
+  }
+
+  disableAttributes() {
+    const glw = this.glw;
+    const attribLen = this.attributeLocations.length;
+    for (let i = 0; i < attribLen; i++) {
+      glw.disableVertexAttribArray(i);
+    }
+  }
+
+  reuseRenderOp(node: CoreNode, currentRenderOp: WebGlRenderOp): boolean {
+    if (this.lifecycle.canBatch !== undefined) {
+      return this.lifecycle.canBatch(node, currentRenderOp);
+    }
+
+    const { time, worldAlpha, width, height } = node;
+
+    if (this.useTimeValue === true) {
+      if (time !== currentRenderOp.time) {
+        return false;
+      }
+    }
+
+    if (this.useSystemAlpha === true) {
+      if (worldAlpha !== currentRenderOp.worldAlpha) {
+        return false;
+      }
+    }
+
+    if (this.useSystemDimensions === true) {
+      if (
+        width !== currentRenderOp.width ||
+        height !== currentRenderOp.height
+      ) {
+        return false;
+      }
+    }
+
+    let shaderPropsA: Record<string, unknown> | undefined = undefined;
+    let shaderPropsB: Record<string, unknown> | undefined = undefined;
+
+    const shader = node.props.shader;
+
+    if (shader !== null) {
+      shaderPropsA = (shader as WebGlShaderNode).resolvedProps;
+    }
+
+    const opShader = currentRenderOp.shader;
+    if (opShader !== null) {
+      shaderPropsB = (opShader as WebGlShaderNode).resolvedProps;
+    }
+
+    if (
+      (shaderPropsA === undefined && shaderPropsB !== undefined) ||
+      (shaderPropsA !== undefined && shaderPropsB === undefined)
+    ) {
+      return false;
+    }
+
+    if (shaderPropsA !== undefined && shaderPropsB !== undefined) {
+      for (const key in shaderPropsA) {
+        if (shaderPropsA[key] !== shaderPropsB[key]) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  bindRenderOp(renderOp: WebGlRenderOp) {
+    const isCoreNode = renderOp.isCoreNode;
+
+    this.bindTextures(renderOp.renderOpTextures);
+    this.bindBufferCollection(renderOp.quadBufferCollection);
+
+    const parentHasRenderTexture = renderOp.parentHasRenderTexture;
+    const framebufferDimensions =
+      isCoreNode && renderOp.parentHasRenderTexture
+        ? renderOp.parentFramebufferDimensions
+        : renderOp.framebufferDimensions;
+
+    // Skip if the parent and current operation both have render textures
+    if (USE_RTT && renderOp.rtt === true && parentHasRenderTexture === true) {
+      return;
+    }
+
+    // Bind render texture framebuffer dimensions as resolution
+    // if the parent has a render texture
+    if (USE_RTT && parentHasRenderTexture === true && framebufferDimensions) {
+      const { w, h } = framebufferDimensions;
+      // Force pixel ratio to 1.0 for render textures since they are always 1:1
+      // the final render texture will be rendered to the screen with the correct pixel ratio
+      this.glw.uniform1f('u_pixelRatio', 1.0);
+
+      // Set resolution to the framebuffer dimensions
+      this.glw.uniform2f('u_resolution', w, h);
+    } else {
+      this.glw.uniform1f('u_pixelRatio', renderOp.stage.pixelRatio);
+
+      this.glw.uniform2f(
+        'u_resolution',
+        this.glw.canvas.width,
+        this.glw.canvas.height,
+      );
+    }
+
+    if (this.useTimeValue === true) {
+      this.glw.uniform1f('u_time', renderOp.time);
+    }
+
+    if (this.useSystemAlpha === true) {
+      this.glw.uniform1f('u_alpha', renderOp.worldAlpha);
+    }
+
+    if (this.useSystemDimensions === true) {
+      this.glw.uniform2f('u_dimensions', renderOp.width, renderOp.height);
+    }
+
+    const shader = renderOp.shader as WebGlShaderNode;
+    if (shader.props !== undefined) {
+      /**
+       * loop over all precalculated uniform types
+       */
+      const uniforms = shader.uniforms;
+
+      for (const key in uniforms.single) {
+        const { method, value } = uniforms.single[key]!;
+        this.glw[method as keyof UniformSet1Param](key, value as never);
+      }
+
+      for (const key in uniforms.vec2) {
+        const { method, value } = uniforms.vec2[key]!;
+        this.glw[method as keyof UniformSet2Params](key, value[0], value[1]);
+      }
+
+      for (const key in uniforms.vec3) {
+        const { method, value } = uniforms.vec3[key]!;
+        this.glw[method as keyof UniformSet3Params](
+          key,
+          value[0],
+          value[1],
+          value[2],
+        );
+      }
+
+      for (const key in uniforms.vec4) {
+        const { method, value } = uniforms.vec4[key]!;
+        this.glw[method as keyof UniformSet4Params](
+          key,
+          value[0],
+          value[1],
+          value[2],
+          value[3],
+        );
+      }
+    }
+  }
+
+  bindBufferCollection(buffer: BufferCollection) {
+    const { glw } = this;
+    const attribs = this.attributeLocations;
+    const attribLen = attribs.length;
+
+    for (let i = 0; i < attribLen; i++) {
+      const name = attribs[i]!;
+      const resolvedBuffer = buffer.getBuffer(name);
+      const resolvedInfo = buffer.getAttributeInfo(name);
+      if (resolvedBuffer === undefined || resolvedInfo === undefined) {
+        continue;
+      }
+      glw.enableVertexAttribArray(i);
+      glw.vertexAttribPointer(
+        resolvedBuffer,
+        i,
+        resolvedInfo.size,
+        resolvedInfo.type,
+        resolvedInfo.normalized,
+        resolvedInfo.stride,
+        resolvedInfo.offset,
+      );
+    }
+  }
+
+  bindTextures(textures: WebGlCtxTexture[]) {
+    if (textures[0] === undefined) {
+      return;
+    }
+    this.glw.activeTexture(0);
+    this.glw.bindTexture(textures[0].ctxTexture);
+  }
+
+  attach(): void {
+    if (this.isDestroyed === true) {
+      return;
+    }
+    this.glw.useProgram(this.program, this.uniformLocations!);
+    if (this.glw.isWebGl2() && this.vao) {
+      this.glw.bindVertexArray(this.vao);
+    }
+  }
+
+  detach(): void {
+    this.disableAttributes();
+  }
+
+  destroy() {
+    if (this.isDestroyed === true) {
+      return;
+    }
+    const glw = this.glw;
+
+    this.detach();
+
+    glw.deleteProgram(this.program!);
+    this.program = null;
+    this.uniformLocations = null;
+
+    const attribs = this.attributeLocations;
+    const attribLen = this.attributeLocations.length;
+    for (let i = 0; i < attribLen; i++) {
+      this.glw.deleteBuffer(attribs[i]!);
+    }
+  }
+}
