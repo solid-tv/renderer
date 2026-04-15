@@ -124,30 +124,57 @@ export class CanvasRenderer extends CoreRenderer {
 
     if (textureType !== TextureType.color) {
       const tintColor = parseColor(color);
-      if (textureType !== TextureType.subTexture) {
-        const image = (texture.ctxTexture as CanvasTexture).getImage(tintColor);
-        this.context.globalAlpha = tintColor.a ?? node.worldAlpha;
-        this.context.drawImage(image, tx, ty, width, height);
-        this.context.globalAlpha = 1;
-        return;
+      let image: ImageBitmap | HTMLCanvasElement | HTMLImageElement;
+
+      if (textureType === TextureType.subTexture) {
+        image = (
+          (texture as SubTexture).parentTexture.ctxTexture as CanvasTexture
+        ).getImage(tintColor);
+      } else {
+        image = (texture.ctxTexture as CanvasTexture).getImage(tintColor);
       }
-      const image = (
-        (texture as SubTexture).parentTexture.ctxTexture as CanvasTexture
-      ).getImage(tintColor);
-      const props = (texture as SubTexture).props;
 
       this.context.globalAlpha = tintColor.a ?? node.worldAlpha;
-      this.context.drawImage(
-        image,
-        props.x,
-        props.y,
-        props.w,
-        props.h,
-        tx,
-        ty,
-        width,
-        height,
-      );
+
+      const txCoords = node.textureCoords;
+      if (txCoords) {
+        const ix = image.width;
+        const iy = image.height;
+
+        let sx = txCoords.x1 * ix;
+        let sy = txCoords.y1 * iy;
+        let sw = (txCoords.x2 - txCoords.x1) * ix;
+        let sh = (txCoords.y2 - txCoords.y1) * iy;
+
+        let flipX = false;
+        let flipY = false;
+
+        if (sw < 0) {
+          flipX = true;
+          sx += sw;
+          sw = Math.abs(sw);
+        }
+        if (sh < 0) {
+          flipY = true;
+          sy += sh;
+          sh = Math.abs(sh);
+        }
+
+        if (flipX || flipY) {
+          this.context.save();
+          this.context.translate(
+            tx + (flipX ? width : 0),
+            ty + (flipY ? height : 0),
+          );
+          this.context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+          this.context.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
+          this.context.restore();
+        } else {
+          this.context.drawImage(image, sx, sy, sw, sh, tx, ty, width, height);
+        }
+      } else {
+        this.context.drawImage(image, tx, ty, width, height);
+      }
       this.context.globalAlpha = 1;
       return;
     }
@@ -244,6 +271,92 @@ export class CanvasRenderer extends CoreRenderer {
    */
   updateClearColor(color: number) {
     this.clearColor = normalizeCanvasColor(color);
+  }
+
+  override getTextureCoords(
+    node: CoreNode,
+  ): import('../../textures/Texture.js').TextureCoords | undefined {
+    const texture = node.texture;
+    if (texture === null) {
+      return undefined;
+    }
+
+    const ctxTexture =
+      texture.type === TextureType.subTexture
+        ? (texture as SubTexture).parentTexture.ctxTexture
+        : texture.ctxTexture;
+    if (ctxTexture === undefined) {
+      return undefined;
+    }
+
+    const textureOptions = node.props.textureOptions;
+
+    // early exit for textures with no options unless its a subtexture
+    if (
+      texture.type !== TextureType.subTexture &&
+      textureOptions === undefined
+    ) {
+      return { x1: 0, y1: 0, x2: 1, y2: 1 };
+    }
+
+    let x1 = 0,
+      y1 = 0,
+      x2 = 1,
+      y2 = 1;
+    if (texture.type === TextureType.subTexture) {
+      const { w: parentW, h: parentH } = (texture as SubTexture).parentTexture
+        .dimensions!;
+      const { x, y, w, h } = (texture as SubTexture).props;
+      x1 = x / parentW;
+      y1 = y / parentH;
+      x2 = x1 + w / parentW;
+      y2 = y1 + h / parentH;
+    }
+
+    if (textureOptions !== undefined && textureOptions !== null) {
+      const resizeMode = textureOptions.resizeMode;
+      if (
+        resizeMode !== undefined &&
+        resizeMode.type === 'cover' &&
+        texture.dimensions !== null
+      ) {
+        const dimensions =
+          texture.dimensions as import('../../../common/CommonTypes.js').Dimensions;
+        const w = node.props.w;
+        const h = node.props.h;
+        const scaleX = w / dimensions.w;
+        const scaleY = h / dimensions.h;
+        const scale = Math.max(scaleX, scaleY);
+        const precision = 1 / scale;
+
+        // Determine based on width
+        if (scaleX < scale) {
+          const desiredSize = precision * node.props.w;
+          x1 = (1 - desiredSize / dimensions.w) * (resizeMode.clipX ?? 0.5);
+          x2 = x1 + desiredSize / dimensions.w;
+        }
+        // Determine based on height
+        if (scaleY < scale) {
+          const desiredSize = precision * node.props.h;
+          y1 = (1 - desiredSize / dimensions.h) * (resizeMode.clipY ?? 0.5);
+          y2 = y1 + desiredSize / dimensions.h;
+        }
+      }
+
+      if (textureOptions.flipX === true) {
+        [x1, x2] = [x2, x1];
+      }
+      if (textureOptions.flipY === true) {
+        [y1, y2] = [y2, y1];
+      }
+    }
+
+    return {
+      x1,
+      y1,
+      x2,
+      y2,
+    };
   }
 
   override updateViewport(): void {
