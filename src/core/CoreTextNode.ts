@@ -267,10 +267,12 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
     this.props.w = width;
     this.props.h = height;
 
+    // Text dimensions may have changed, recalculate transforms and bounds
+    this.setUpdateType(UpdateType.Local | UpdateType.RenderBounds);
+
     // Handle SDF renderer (uses layout caching)
     if (textRendererType === 'sdf') {
       this.setRenderable(true);
-      this.setUpdateType(UpdateType.Local);
     }
 
     this._renderInfo = result;
