@@ -55,24 +55,6 @@ export function roundedRectWithBorder(
   innerW += width;
   innerH += height;
 
-  // no gap render strategy - to avoid artifacts between border and node
-  if (borderGap === 0) {
-    //draw outer border rounded rect
-    ctx.beginPath();
-    roundRect(ctx, outerX, outerY, outerW, outerH, outerBorderRadius);
-    ctx.fillStyle = borderColor;
-    ctx.fill();
-    ctx.closePath();
-
-    const path = new Path2D();
-    roundRect(path, innerX, innerY, innerW, innerH, innerBorderRadius as Vec4);
-    ctx.clip(path);
-    renderContext();
-    return;
-  }
-
-  // with gap render strategy
-
   //draw node content first
   ctx.save();
   const path = new Path2D();

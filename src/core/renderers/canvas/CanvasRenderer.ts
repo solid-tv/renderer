@@ -169,8 +169,22 @@ export class CanvasRenderer extends CoreRenderer {
         endY = ty;
         endColor = node.premultipliedColorTr;
       }
+
+      let startColor = color;
+      const startAlpha = (startColor >>> 24) & 0xff;
+      const endAlpha = (endColor >>> 24) & 0xff;
+
+      // if one of the colors has 0 alpha, we want to match the RGB channels
+      // to the other color to prevent white bleed during zero alpha interpolation.
+      if (startAlpha === 0 && endAlpha > 0) {
+        startColor =
+          ((startColor & 0xff000000) | (endColor & 0x00ffffff)) >>> 0;
+      } else if (endAlpha === 0 && startAlpha > 0) {
+        endColor = ((endColor & 0xff000000) | (startColor & 0x00ffffff)) >>> 0;
+      }
+
       const gradient = this.context.createLinearGradient(tx, ty, endX, endY);
-      gradient.addColorStop(0, normalizeCanvasColor(color));
+      gradient.addColorStop(0, normalizeCanvasColor(startColor));
       gradient.addColorStop(1, normalizeCanvasColor(endColor));
       this.context.fillStyle = gradient;
       this.context.fillRect(tx, ty, width, height);

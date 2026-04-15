@@ -31,7 +31,24 @@ export const LinearGradient: CanvasShaderType<
       y0: line * Math.sin(angle) + nHeight * 0.5,
       x1: line * Math.cos(angle + Math.PI) + nWidth * 0.5,
       y1: line * Math.sin(angle + Math.PI) + nHeight * 0.5,
-      colors: this.props!.colors.map((value) => this.toColorString(value)),
+      colors: this.props!.colors.map((value, i, arr) => {
+        const alpha = (value >>> 24) & 0xff;
+        if (alpha === 0) {
+          let nearestRGB = value & 0x00ffffff;
+          for (let step = 1; step < arr.length; step++) {
+            if (i - step >= 0 && ((arr[i - step]! >>> 24) & 0xff) > 0) {
+              nearestRGB = arr[i - step]! & 0x00ffffff;
+              break;
+            }
+            if (i + step < arr.length && ((arr[i + step]! >>> 24) & 0xff) > 0) {
+              nearestRGB = arr[i + step]! & 0x00ffffff;
+              break;
+            }
+          }
+          value = (value & 0xff000000) | nearestRGB;
+        }
+        return this.toColorString(value);
+      }),
     };
   },
   render(ctx, node, renderContext) {
