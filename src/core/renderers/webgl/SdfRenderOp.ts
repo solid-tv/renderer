@@ -33,10 +33,10 @@ export class SdfRenderOp extends CoreRenderOp {
     readonly renderer: WebGlRenderer,
     readonly shader: WebGlShaderNode,
     readonly quadBufferCollection: BufferCollection,
-    public worldAlpha: number,
-    public clippingRect: RectWithValid,
-    readonly width: number,
-    readonly height: number,
+    readonly worldAlpha: number,
+    readonly clippingRect: RectWithValid,
+    readonly w: number,
+    readonly h: number,
     readonly rtt: boolean,
     public parentHasRenderTexture: boolean,
     public framebufferDimensions: Dimensions | null,
@@ -70,8 +70,8 @@ export class SdfRenderOp extends CoreRenderOp {
       const pixelRatio =
         USE_RTT && this.parentHasRenderTexture ? 1 : stage.pixelRatio;
       const clipX = Math.round(this.clippingRect.x * pixelRatio);
-      const clipWidth = Math.round(this.clippingRect.width * pixelRatio);
-      const clipHeight = Math.round(this.clippingRect.height * pixelRatio);
+      const clipWidth = Math.round(this.clippingRect.w * pixelRatio);
+      const clipHeight = Math.round(this.clippingRect.h * pixelRatio);
       let clipY = Math.round(
         options.canvas.height - clipHeight - this.clippingRect.y * pixelRatio,
       );
@@ -79,7 +79,7 @@ export class SdfRenderOp extends CoreRenderOp {
       // to be relative to the parent's framebuffer
       if (USE_RTT && this.parentHasRenderTexture) {
         clipY = this.framebufferDimensions
-          ? this.framebufferDimensions.h - this.height
+          ? this.framebufferDimensions.h - this.h
           : 0;
       }
 

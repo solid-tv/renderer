@@ -134,7 +134,7 @@ export class WebGlShaderProgram implements CoreShaderProgram {
       return this.lifecycle.canBatch(node, currentRenderOp);
     }
 
-    const { time, worldAlpha, width, height } = node;
+    const { time, worldAlpha, w, h } = node;
 
     if (this.useTimeValue === true) {
       if (time !== currentRenderOp.time) {
@@ -149,10 +149,7 @@ export class WebGlShaderProgram implements CoreShaderProgram {
     }
 
     if (this.useSystemDimensions === true) {
-      if (
-        width !== currentRenderOp.width ||
-        height !== currentRenderOp.height
-      ) {
+      if (w !== currentRenderOp.w || h !== currentRenderOp.h) {
         return false;
       }
     }
@@ -235,7 +232,7 @@ export class WebGlShaderProgram implements CoreShaderProgram {
     }
 
     if (this.useSystemDimensions === true) {
-      this.glw.uniform2f('u_dimensions', renderOp.width, renderOp.height);
+      this.glw.uniform2f('u_dimensions', renderOp.w, renderOp.h);
     }
 
     const shader = renderOp.shader as WebGlShaderNode;

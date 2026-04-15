@@ -57,8 +57,8 @@ export enum CoreNodeRenderState {
 const NO_CLIPPING_RECT: RectWithValid = {
   x: 0,
   y: 0,
-  width: 0,
-  height: 0,
+  w: 0,
+  h: 0,
   valid: false,
 };
 
@@ -769,8 +769,8 @@ export class CoreNode extends EventEmitter {
   public clippingRect: RectWithValid = {
     x: 0,
     y: 0,
-    width: 0,
-    height: 0,
+    w: 0,
+    h: 0,
     valid: false,
   };
   public textureCoords?: TextureCoords;
@@ -1793,8 +1793,8 @@ export class CoreNode extends EventEmitter {
     if (clipping === true && isRotated === false) {
       clippingRect.x = gt!.tx;
       clippingRect.y = gt!.ty;
-      clippingRect.width = this.props.w * gt!.ta;
-      clippingRect.height = this.props.h * gt!.td;
+      clippingRect.w = this.props.w * gt!.ta;
+      clippingRect.h = this.props.h * gt!.td;
       clippingRect.valid = true;
     } else {
       clippingRect.valid = false;
@@ -2851,17 +2851,19 @@ export class CoreNode extends EventEmitter {
         USE_RTT && this.parentHasRenderTexture ? 1 : stage.pixelRatio;
 
       const clipX = Math.round(this.clippingRect.x * pixelRatio);
-      const clipWidth = Math.round(this.clippingRect.width * pixelRatio);
-      const clipHeight = Math.round(this.clippingRect.height * pixelRatio);
+      const clipWidth = Math.round(this.clippingRect.w * pixelRatio);
+      const clipHeight = Math.round(this.clippingRect.h * pixelRatio);
       let clipY = Math.round(
         options.canvas.height - clipHeight - this.clippingRect.y * pixelRatio,
       );
       // if parent has render texture, we need to adjust the scissor rect
       // to be relative to the parent's framebuffer
       if (USE_RTT && this.parentHasRenderTexture) {
-        clipY = this.parentFramebufferDimensions
-          ? this.parentFramebufferDimensions.h - this.props.h
-          : 0;
+        const parentFramebufferDimensions = this.parentFramebufferDimensions;
+        clipY =
+          parentFramebufferDimensions !== null
+            ? parentFramebufferDimensions.h - this.props.h
+            : 0;
       }
 
       glw.setScissorTest(true);
