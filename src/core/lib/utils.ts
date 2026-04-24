@@ -218,6 +218,18 @@ export function compareRect(a: Rect | null, b: Rect | null): boolean {
   if (a === null || b === null) {
     return false;
   }
+
+  const aValid = (a as RectWithValid).valid;
+  const bValid = (b as RectWithValid).valid;
+
+  if (aValid === false && bValid === false) {
+    return true;
+  }
+
+  if (aValid !== bValid) {
+    return false;
+  }
+
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 }
 
