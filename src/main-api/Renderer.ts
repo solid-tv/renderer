@@ -957,8 +957,10 @@ export class RendererMain extends EventEmitter {
     this.canvas.width = deviceLogicalWidth * devicePhysicalPixelRatio;
     this.canvas.height = deviceLogicalHeight * devicePhysicalPixelRatio;
 
-    this.canvas.style.width = `${deviceLogicalWidth}px`;
-    this.canvas.style.height = `${deviceLogicalHeight}px`;
+    if (this.canvas.style) {
+      this.canvas.style.width = `${deviceLogicalWidth}px`;
+      this.canvas.style.height = `${deviceLogicalHeight}px`;
+    }
 
     this.stage.renderer.updateViewport();
 
