@@ -8,6 +8,7 @@ import type {
 
 export interface AnimationSettings {
   duration: number;
+  adaptiveDuration: boolean;
   delay: number;
   easing: string | TimingFunction;
   loop: boolean;
@@ -23,7 +24,6 @@ export function createAnimation(
 ): AnimationConfig {
   const easing = settings.easing || 'linear';
   const delay = settings.delay ?? 0;
-
   let propValues: Record<string, PropValues> | null = null;
   let shaderPropValues: Record<string, PropValues> | null = null;
 
@@ -73,6 +73,7 @@ export function createAnimation(
     shaderProps: shaderPropValues,
     stoppedResolve: null,
     stoppedPromise: null,
+    lastRunTime: settings.adaptiveDuration ? performance.now() : 0,
 
     start() {
       if (this.state !== 'running' && this.state !== 'scheduled') {

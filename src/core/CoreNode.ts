@@ -2837,6 +2837,15 @@ export class CoreNode extends EventEmitter {
         values.start = (this as any)[name] ?? 0;
         values.target = value;
         controller.progress = 0;
+
+        if (settings.adaptiveDuration === true) {
+          const now = performance.now();
+          const elapsed = now - controller.lastRunTime;
+          controller.lastRunTime = now;
+          const duration = settings.duration ?? controller.duration;
+          controller.duration = elapsed < duration ? elapsed : duration;
+        }
+
         return controller.start();
       }
     }
@@ -2850,6 +2859,14 @@ export class CoreNode extends EventEmitter {
     );
     this._animations[name] = { controller, settings };
     return controller.start();
+  }
+
+  animateToTarget(prop: string): number | undefined {
+    const animation = this._animations[prop];
+    if (!animation) {
+      return undefined;
+    }
+    return animation.controller.props?.[prop]?.target;
   }
 
   flush() {

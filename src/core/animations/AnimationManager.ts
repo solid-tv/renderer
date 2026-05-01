@@ -16,6 +16,7 @@ export interface AnimationConfig extends IAnimationController {
   manager: AnimationManager;
   node: CoreNode;
   duration: number;
+  lastRunTime: number;
   delayFor: number;
   delay: number;
   progress: number;
