@@ -600,18 +600,16 @@ export class WebGlRenderer extends CoreRenderer {
 
     // Pre-compute the merged color (with alpha) packed as ABGR for
     // UNSIGNED_BYTE normalized attribute.
+    // NOTE: Do NOT premultiply RGB by alpha here — the SDF fragment shader
+    // already multiplies v_color.rgb by the computed opacity (which includes
+    // v_color.a).
     const mergedColor = mergeColorAlpha(color, worldAlpha);
     const r = mergedColor >>> 24;
     const g = (mergedColor >>> 16) & 0xff;
     const b = (mergedColor >>> 8) & 0xff;
     const a = mergedColor & 0xff;
-    // Premultiply alpha into RGB for correct blending
-    const na = a / 255;
-    const pr = (r * na) | 0;
-    const pg = (g * na) | 0;
-    const pb = (b * na) | 0;
     // Pack as ABGR uint32 (little-endian read as vec4(r,g,b,a) normalized)
-    const packedColor = ((a << 24) | (pb << 16) | (pg << 8) | pr) >>> 0;
+    const packedColor = ((a << 24) | (b << 16) | (g << 8) | r) >>> 0;
 
     // Transform matrix components (column-major 3x3)
     // Pre-multiply fontScale here to save 4 multiplications per glyph in the hot loop
