@@ -13,7 +13,8 @@ import type { BufferCollection } from './renderers/webgl/internal/BufferCollecti
 import type { CoreRenderer } from './renderers/CoreRenderer.js';
 import type { Stage } from './Stage.js';
 import {
-  type Texture,
+  Texture,
+  TextureType,
   type TextureCoords,
   type TextureFailedEventHandler,
   type TextureFreedEventHandler,
@@ -2740,6 +2741,11 @@ export class CoreNode extends EventEmitter {
       this.loadTexture();
     }
 
+    if (this.texture?.type === TextureType.subTexture && this.textureLoaded) {
+      // When setting the texture value of a subtexture but the atlas is already loaded,
+      // requestRenderListUpdate is not triggered, but we still need to update the quad
+      this.isQuadDirty = true;
+    }
     this.setUpdateType(UpdateType.IsRenderable);
     this.updateIsSimple();
   }
