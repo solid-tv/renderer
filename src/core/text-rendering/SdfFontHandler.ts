@@ -417,12 +417,13 @@ export const isFontLoaded = (fontFamily: string): boolean => {
  */
 export const getFontMetrics = (
   fontFamily: string,
-
   fontSize: number,
 ): NormalizedFontMetrics => {
-  const out = normalizedMetrics.get(fontFamily);
-  if (out !== undefined) {
-    return out;
+  const label = fontFamily + '_' + fontSize;
+  const metricsCache = normalizedMetrics.get(label);
+
+  if (metricsCache !== undefined) {
+    return metricsCache;
   }
   let metrics = fontCache.get(fontFamily)!.metrics;
   return processFontMetrics(fontFamily, fontSize, metrics);
@@ -433,7 +434,7 @@ export const processFontMetrics = (
   fontSize: number,
   metrics: FontMetrics,
 ): NormalizedFontMetrics => {
-  const label = fontFamily + fontSize;
+  const label = fontFamily + '_' + fontSize;
   const normalized = normalizeFontMetrics(metrics, fontSize);
   normalizedMetrics.set(label, normalized);
   return normalized;
