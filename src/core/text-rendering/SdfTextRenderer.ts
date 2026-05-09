@@ -35,7 +35,7 @@ const font: FontHandler = SdfFontHandler;
 const layoutCache = new Map<string, TextLayout>();
 
 const getLayoutCacheKey = (props: CoreTextNodeProps): string =>
-  `${props.fontFamily}-${props.fontSize}-${props.letterSpacing}-${props.lineHeight}-${props.maxHeight}-${props.maxWidth}-${props.textAlign}-${props.text}`;
+  `${props.fontFamily}-${props.fontSize}-${props.letterSpacing}-${props.lineHeight}-${props.maxHeight}-${props.maxWidth}-${props.maxLines}-${props.textAlign}-${props.wordBreak}-${props.overflowSuffix}-${props.text}`;
 
 /**
  * SDF text renderer using MSDF/SDF fonts with WebGL
