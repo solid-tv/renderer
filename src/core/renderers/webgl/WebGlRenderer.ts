@@ -1089,6 +1089,12 @@ export class WebGlRenderer extends CoreRenderer {
       this.needsFullUpload = true;
       this.lastUploadedBufferSize = 0;
 
+      // Clear merge anchors so the first addQuad / addSdfQuads in this pass
+      // can't extend a stale op left over from the previous RTT pass (whose
+      // node is no longer in renderOps and would silently swallow the draw).
+      this.curRenderOp = null;
+      this.curSdfRenderOp = null;
+
       // Recursively render the full subtree into the RTT framebuffer.
       // The old code only called renderQuads on direct children, missing
       // grandchildren and deeper descendants.
