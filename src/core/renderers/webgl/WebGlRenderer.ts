@@ -59,6 +59,21 @@ export class WebGlRenderer extends CoreRenderer {
   fQuadBuffer: Float32Array;
   uiQuadBuffer: Uint32Array;
   renderOps: WebGlRenderOp[] = [];
+  /**
+   * Deferred queue for SDF text render ops, used when RENDER_TEXT_BATCHING is
+   * true. All text encountered during the frame is collected here and appended
+   * to renderOps at the end (see flushTextRenderOps). This guarantees that all
+   * text in a frame draws in a single contiguous run of draw calls, which is
+   * the whole point of text batching.
+   *
+   * Side effect by design: text always draws on top of any non-text quads that
+   * came after it in tree order (unless those quads carry an explicit zIndex,
+   * which forces an early flush in addQuad). This is intentional — UI text
+   * sitting above adjacent backgrounds/icons is the common case, and the
+   * batching win is only worth taking if we don't break the run with mid-frame
+   * flushes. If you need a non-text quad to land above earlier text, give it
+   * a non-zero zIndex.
+   */
   coreTextRenderOps: WebGlRenderOp[] = [];
 
   //// Render Op / Buffer Filling State
@@ -361,6 +376,10 @@ export class WebGlRenderer extends CoreRenderer {
     const f = this.fQuadBuffer;
     const u = this.uiQuadBuffer;
 
+    // Explicit zIndex on a non-text quad opts out of the text-batching
+    // ordering: flush deferred text now so this quad lands above any text
+    // that came earlier in tree order. See coreTextRenderOps for the
+    // intentional default behavior.
     if (RENDER_TEXT_BATCHING === true && node.props.zIndex) {
       this.flushTextRenderOps();
     }
