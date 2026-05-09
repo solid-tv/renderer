@@ -98,7 +98,6 @@ export interface MemoryInfo {
 export class TextureMemoryManager {
   private memUsed = 0;
   private loadedTextures: Set<Texture> = new Set();
-  private orphanedTextures: Set<Texture> = new Set();
   private criticalThreshold: number = 124e6;
   private targetThreshold: number = 0.5;
   private cleanupInterval: number = 5000;
@@ -125,32 +124,6 @@ export class TextureMemoryManager {
 
   constructor(private stage: Stage, settings: TextureMemoryManagerSettings) {
     this.updateSettings(settings);
-  }
-
-  /**
-   * Add a texture to the orphaned textures list
-   *
-   * @param texture - The texture to add to the orphaned textures list
-   */
-  addToOrphanedTextures(texture: Texture) {
-    // if the texture is already in the orphaned textures list add it at the end
-    if (this.orphanedTextures.has(texture)) {
-      this.orphanedTextures.delete(texture);
-    }
-
-    // If the texture can be cleaned up, add it to the orphaned textures list
-    if (texture.preventCleanup === false) {
-      this.orphanedTextures.add(texture);
-    }
-  }
-
-  /**
-   * Remove a texture from the orphaned textures list
-   *
-   * @param texture - The texture to remove from the orphaned textures list
-   */
-  removeFromOrphanedTextures(texture: Texture) {
-    this.orphanedTextures.delete(texture);
   }
 
   /**
