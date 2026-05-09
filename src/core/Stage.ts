@@ -809,6 +809,12 @@ export class Stage {
       this.strictBound,
       this.boundsMargin,
     );
+    // The frame loop walks root.children directly without running root.update
+    // (see this.update), so root.createRenderBounds is never invoked. Refresh
+    // root's bounds in lockstep with the stage so descendants pick up the new
+    // viewport via createRenderBounds' parent.strictBound copy.
+    this.root.strictBound = this.strictBound;
+    this.root.preloadBound = this.preloadBound;
     this.root.setUpdateType(UpdateType.RenderBounds | UpdateType.Children);
     this.root.childUpdateType |= UpdateType.RenderBounds;
   }
