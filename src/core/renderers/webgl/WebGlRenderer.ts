@@ -58,6 +58,16 @@ export class WebGlRenderer extends CoreRenderer {
   quadBuffer: ArrayBuffer;
   fQuadBuffer: Float32Array;
   uiQuadBuffer: Uint32Array;
+  /**
+   * Separate buffer for RTT quad data. Required when DIRTY_QUAD_BUFFER is on:
+   * main-scene nodes own permanent slots in `quadBuffer` and only rewrite when
+   * dirty, so if RTT wrote into the same backing storage starting at index 0
+   * it would silently overwrite (and corrupt) main-scene slots whose owners
+   * aren't dirty this frame. Allocated lazily on first RTT.
+   */
+  rttQuadBuffer: ArrayBuffer | null = null;
+  fRttQuadBuffer: Float32Array | null = null;
+  uiRttQuadBuffer: Uint32Array | null = null;
   renderOps: WebGlRenderOp[] = [];
   /**
    * Deferred queue for SDF text render ops, used when RENDER_TEXT_BATCHING is
@@ -373,8 +383,17 @@ export class WebGlRenderer extends CoreRenderer {
    * The function updates the length and number of quads in the current render operation, and updates the current buffer index.
    */
   addQuad(node: CoreNode) {
-    const f = this.fQuadBuffer;
-    const u = this.uiQuadBuffer;
+    let f = this.fQuadBuffer;
+    let u = this.uiQuadBuffer;
+    if (USE_RTT && this.renderToTextureActive === true) {
+      if (this.fRttQuadBuffer === null) {
+        this.rttQuadBuffer = new ArrayBuffer(this.stage.options.quadBufferSize);
+        this.fRttQuadBuffer = new Float32Array(this.rttQuadBuffer);
+        this.uiRttQuadBuffer = new Uint32Array(this.rttQuadBuffer);
+      }
+      f = this.fRttQuadBuffer;
+      u = this.uiRttQuadBuffer!;
+    }
 
     // Explicit zIndex on a non-text quad opts out of the text-batching
     // ordering: flush deferred text now so this quad lands above any text
@@ -1186,12 +1205,13 @@ export class WebGlRenderer extends CoreRenderer {
     if (RENDER_TEXT_BATCHING === true) {
       this.flushTextRenderOps();
     }
-    const { glw, quadBuffer } = this;
+    const { glw } = this;
     const buffer = this.quadBufferCollection.getBuffer('a_position') || null;
 
     // Always do a full upload for RTT — the buffer is rebuilt from scratch
-    // each frame with sequential slots starting at index 0.
-    const arr = new Float32Array(quadBuffer, 0, this.curBufferIdx);
+    // each frame with sequential slots starting at index 0. Upload from the
+    // dedicated RTT ArrayBuffer so we don't read stale main-scene data.
+    const arr = new Float32Array(this.rttQuadBuffer!, 0, this.curBufferIdx);
     glw.arrayBufferData(buffer, arr, glw.STATIC_DRAW);
 
     for (let i = 0, length = this.renderOps.length; i < length; i++) {
