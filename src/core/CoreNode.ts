@@ -2577,10 +2577,21 @@ export class CoreNode extends EventEmitter {
       return;
     }
 
+    // If there's still an RTT ancestor higher up (nested RTT case), descendants
+    // should inherit from that ancestor rather than be detached from RTT
+    // entirely. Otherwise — when this node was the only RTT in the chain —
+    // fully clear inheritance.
+    const ancestorRTT = this.findParentRTTNode();
+
     for (const child of this.children) {
+      if (ancestorRTT !== null) {
+        child.parentHasRenderTexture = true;
+        child.rttParent = ancestorRTT;
+      } else {
+        child.parentHasRenderTexture = false;
+        child.rttParent = null;
+      }
       // force child to update everything as the RTT inheritance has changed
-      child.parentHasRenderTexture = false;
-      child.rttParent = null;
       child.setUpdateType(UpdateType.All);
       child.clearRTTInheritance();
     }
