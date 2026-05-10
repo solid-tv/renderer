@@ -680,14 +680,32 @@ export class RendererMain extends EventEmitter {
    */
   createNode<ShNode extends CoreShaderNode<any>>(
     props: Partial<INodeProps<ShNode>>,
+    resolved = false,
   ): INode<ShNode> {
-    const node = this.stage.createNode(props as Partial<CoreNodeProps>);
+    const node = this.stage.createNode(
+      props as Partial<CoreNodeProps>,
+      resolved,
+    );
 
     if (ENABLE_INSPECTOR && this.inspector) {
       return this.inspector.createNode(node) as unknown as INode<ShNode>;
     }
 
     return node as unknown as INode<ShNode>;
+  }
+
+  /**
+   * Allocate a fully-resolved CoreNodeProps bag — the same shape and
+   * defaults the renderer would otherwise build inside `createNode`.
+   *
+   * Frameworks (e.g. solid-tv) call this once per node at construction
+   * time, fill it in as user props flow in, then pass it back via
+   * `createNode(props, true)`.  The renderer adopts the bag directly:
+   * one allocation instead of two, and a stable hidden class for the
+   * node's lifetime.
+   */
+  createNodeProps(initial?: Partial<CoreNodeProps>): CoreNodeProps {
+    return this.stage.createNodeProps(initial);
   }
 
   /**
@@ -704,14 +722,25 @@ export class RendererMain extends EventEmitter {
    * @param props
    * @returns
    */
-  createTextNode(props: Partial<ITextNodeProps>): ITextNode {
-    const textNode = this.stage.createTextNode(props as CoreTextNodeProps);
+  createTextNode(props: Partial<ITextNodeProps>, resolved = false): ITextNode {
+    const textNode = this.stage.createTextNode(
+      props as CoreTextNodeProps,
+      resolved,
+    );
 
     if (ENABLE_INSPECTOR && this.inspector) {
       return this.inspector.createTextNode(textNode) as unknown as ITextNode;
     }
 
     return textNode as unknown as ITextNode;
+  }
+
+  /**
+   * Allocate a fully-resolved CoreTextNodeProps bag.  See
+   * {@link createNodeProps}.
+   */
+  createTextNodeProps(initial?: Partial<CoreTextNodeProps>): CoreTextNodeProps {
+    return this.stage.createTextNodeProps(initial);
   }
 
   /**

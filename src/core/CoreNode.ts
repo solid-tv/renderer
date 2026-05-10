@@ -2602,13 +2602,19 @@ export class CoreNode extends EventEmitter {
   }
 
   set shader(shader: CoreShaderNode<any> | null) {
-    if (this.props.shader === shader) {
+    // Null means "use the stage's default shader".  Handle this before the
+    // equality short-circuit so that `set shader(null)` still applies the
+    // default when `props.shader` is also null (e.g. when a framework
+    // adopted a freshly-allocated props bag where shader was cleared).
+    if (shader === null) {
+      const def = this.stage.defShaderNode;
+      if (this.props.shader === def) return;
+      this.hasShaderUpdater = false;
+      this.props.shader = def;
+      this.setUpdateType(UpdateType.IsRenderable);
       return;
     }
-    if (shader === null) {
-      this.hasShaderUpdater = false;
-      this.props.shader = this.stage.defShaderNode;
-      this.setUpdateType(UpdateType.IsRenderable);
+    if (this.props.shader === shader) {
       return;
     }
     if (shader.shaderKey !== 'default') {

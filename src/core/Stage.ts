@@ -750,15 +750,67 @@ export class Stage {
     return null;
   }
 
-  createNode(props: Partial<CoreNodeProps>) {
-    const resolvedProps = this.resolveNodeDefaults(props);
+  createNode(props: Partial<CoreNodeProps>, resolved = false) {
+    // When `resolved` is true, the caller (typically a framework integration
+    // like solid-tv) built `props` via `createNodeProps` and filled it in
+    // over time.  CoreNode adopts that bag directly — no second resolution
+    // pass and no second allocation.
+    const resolvedProps = resolved
+      ? (props as CoreNodeProps)
+      : this.resolveNodeDefaults(props);
     return new CoreNode(this, resolvedProps);
   }
 
-  createTextNode(props: Partial<CoreTextNodeProps>) {
+  createTextNode(props: Partial<CoreTextNodeProps>, resolved = false) {
+    const resolvedProps = resolved
+      ? (props as CoreTextNodeProps)
+      : this.resolveTextNodeDefaults(props);
+
+    const resolvedTextRenderer = this.resolveTextRenderer(
+      resolvedProps,
+      resolvedProps.textRendererOverride as keyof TextRenderers | null,
+    );
+
+    if (!resolvedTextRenderer) {
+      throw new Error(
+        `No compatible text renderer found for ${resolvedProps.fontFamily}`,
+      );
+    }
+
+    return new CoreTextNode(this, resolvedProps, resolvedTextRenderer);
+  }
+
+  /**
+   * Allocate a fully-resolved CoreNodeProps bag — the same shape and
+   * defaults the renderer would otherwise build inside `createNode`.
+   *
+   * Frameworks (e.g. solid-tv) call this once per node at construction
+   * time, fill it in as user props flow in, then pass it back via
+   * `createNode(props, true)`.  The renderer adopts the bag directly:
+   * one allocation instead of two, and a stable hidden class for the
+   * node's lifetime.
+   */
+  createNodeProps(initial?: Partial<CoreNodeProps>): CoreNodeProps {
+    return this.resolveNodeDefaults(initial ?? {});
+  }
+
+  /**
+   * Allocate a fully-resolved CoreTextNodeProps bag.  See
+   * {@link createNodeProps}.
+   */
+  createTextNodeProps(initial?: Partial<CoreTextNodeProps>): CoreTextNodeProps {
+    return this.resolveTextNodeDefaults(initial ?? {});
+  }
+
+  /**
+   * Apply text-specific defaults on top of a base CoreNodeProps build.
+   * Shared by `createTextNode` and `createTextNodeProps`.
+   */
+  protected resolveTextNodeDefaults(
+    props: Partial<CoreTextNodeProps>,
+  ): CoreTextNodeProps {
     const fontSize = props.fontSize || 16;
     const resolvedProps = this.resolveNodeDefaults(props) as CoreTextNodeProps;
-
     resolvedProps.text = props.text ?? '';
     resolvedProps.textRendererOverride = props.textRendererOverride ?? null;
     resolvedProps.fontSize = fontSize;
@@ -776,19 +828,7 @@ export class Stage {
     resolvedProps.maxWidth = props.maxWidth || 0;
     resolvedProps.maxHeight = props.maxHeight || 0;
     resolvedProps.forceLoad = props.forceLoad || false;
-
-    const resolvedTextRenderer = this.resolveTextRenderer(
-      resolvedProps,
-      resolvedProps.textRendererOverride as keyof TextRenderers | null,
-    );
-
-    if (!resolvedTextRenderer) {
-      throw new Error(
-        `No compatible text renderer found for ${resolvedProps.fontFamily}`,
-      );
-    }
-
-    return new CoreTextNode(this, resolvedProps, resolvedTextRenderer);
+    return resolvedProps;
   }
 
   setBoundsMargin(value: number | [number, number, number, number]) {
