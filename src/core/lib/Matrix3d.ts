@@ -160,6 +160,20 @@ export class Matrix3d {
     return this;
   }
 
+  /**
+   * Writes `tx`/`ty` directly and marks the matrix mutated.
+   *
+   * Caller is responsible for ensuring `ta`/`tb`/`tc`/`td` are already the
+   * desired values — typically the identity rotation/scale (1, 0, 0, 1).
+   * Used by hot paths that know the matrix is in identity-shape so the
+   * 4 redundant field writes performed by `Matrix3d.translate` can be skipped.
+   */
+  public setTranslate(x: number, y: number): void {
+    this.tx = x;
+    this.ty = y;
+    this.mutation = true;
+  }
+
   public scale(sx: number, sy: number): Matrix3d {
     this.ta = this.ta * sx;
     this.tb = this.tb * sy;

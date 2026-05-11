@@ -533,4 +533,234 @@ describe('set color()', () => {
       expect(node.isSimple).toBe(false);
     });
   });
+
+  describe('simple-path localTransform writes', () => {
+    it('reuses the same Matrix3d instance across x/y updates', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      const node = new CoreNode(stage, defaultProps({ parent }));
+
+      node.x = 10;
+      node.y = 20;
+      node.update(0, clippingRect);
+      const lt = node.localTransform!;
+      expect(lt.tx).toBe(10);
+      expect(lt.ty).toBe(20);
+
+      node.x = 100;
+      node.y = 200;
+      node.update(1, clippingRect);
+      // Same instance — no realloc per frame.
+      expect(node.localTransform).toBe(lt);
+      expect(lt.tx).toBe(100);
+      expect(lt.ty).toBe(200);
+      // Identity-shape preserved.
+      expect(lt.ta).toBe(1);
+      expect(lt.tb).toBe(0);
+      expect(lt.tc).toBe(0);
+      expect(lt.td).toBe(1);
+      expect(node._localIsTranslate).toBe(true);
+    });
+
+    it('resets ta/tb/tc/td when transitioning non-simple -> simple', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.props.w = 100;
+      node.props.h = 100;
+      node.pivot = 0.5;
+
+      // First, become non-simple via rotation — local matrix gets non-identity ta/tb/tc/td.
+      node.x = 50;
+      node.y = 50;
+      node.rotation = Math.PI / 2;
+      node.update(0, clippingRect);
+      expect(node._localIsTranslate).toBe(false);
+      const lt = node.localTransform!;
+      // Sanity: matrix is no longer in identity-shape
+      expect(lt.ta === 1 && lt.tb === 0 && lt.tc === 0 && lt.td === 1).toBe(
+        false,
+      );
+
+      // Clear rotation — now simple again.
+      node.rotation = 0;
+      node.x = 5;
+      node.y = 7;
+      node.update(1, clippingRect);
+
+      // Matrix must be restored to identity-shape, NOT carrying stale rotation.
+      expect(node.localTransform).toBe(lt);
+      expect(lt.ta).toBe(1);
+      expect(lt.tb).toBe(0);
+      expect(lt.tc).toBe(0);
+      expect(lt.td).toBe(1);
+      expect(node._localIsTranslate).toBe(true);
+    });
+  });
+
+  describe('translate-only global fast path', () => {
+    it('produces the same global translate as parent + local for simple chains', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.translate(30, 40);
+      // parent is set up by the test as translate-only.
+      parent._globalIsTranslate = true;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.x = 5;
+      node.y = 7;
+      node.update(0, clippingRect);
+
+      expect(node.globalTransform!.tx).toBe(35);
+      expect(node.globalTransform!.ty).toBe(47);
+      expect(node.globalTransform!.ta).toBe(1);
+      expect(node.globalTransform!.tb).toBe(0);
+      expect(node.globalTransform!.tc).toBe(0);
+      expect(node.globalTransform!.td).toBe(1);
+      expect(node._globalIsTranslate).toBe(true);
+    });
+
+    it('propagates _globalIsTranslate through grandchildren', () => {
+      const root = new CoreNode(stage, defaultProps());
+      root.globalTransform = Matrix3d.identity();
+      root._globalIsTranslate = true;
+
+      const mid = new CoreNode(stage, defaultProps({ parent: root }));
+      mid.x = 10;
+      mid.y = 20;
+      mid.update(0, clippingRect);
+      expect(mid._globalIsTranslate).toBe(true);
+
+      const leaf = new CoreNode(stage, defaultProps({ parent: mid }));
+      leaf.x = 3;
+      leaf.y = 4;
+      leaf.update(0, clippingRect);
+      expect(leaf._globalIsTranslate).toBe(true);
+      expect(leaf.globalTransform!.tx).toBe(13);
+      expect(leaf.globalTransform!.ty).toBe(24);
+    });
+
+    it('does not take the fast path when parent is not translate-only', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      // Parent global has a rotation baked in.
+      parent.globalTransform = Matrix3d.rotate(Math.PI / 2);
+      parent._globalIsTranslate = false;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.x = 10;
+      node.y = 0;
+      node.update(0, clippingRect);
+      // Child is simple itself but parent has rotation, so the resulting
+      // global cannot be translate-only.
+      expect(node._globalIsTranslate).toBe(false);
+    });
+
+    it('clears _globalIsTranslate when the node becomes non-simple', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      parent._globalIsTranslate = true;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.props.w = 100;
+      node.props.h = 100;
+      node.x = 10;
+      node.y = 20;
+      node.update(0, clippingRect);
+      expect(node._globalIsTranslate).toBe(true);
+
+      // Add rotation -> non-simple -> global is no longer translate-only.
+      node.pivot = 0.5;
+      node.rotation = Math.PI / 4;
+      node.update(1, clippingRect);
+      expect(node._globalIsTranslate).toBe(false);
+    });
+
+    it('restores identity-shape on globalTransform when re-entering the fast path', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      parent._globalIsTranslate = true;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.props.w = 100;
+      node.props.h = 100;
+      node.pivot = 0.5;
+      node.x = 10;
+      node.y = 20;
+      node.rotation = Math.PI / 2;
+      node.update(0, clippingRect);
+      expect(node._globalIsTranslate).toBe(false);
+      const gt = node.globalTransform!;
+      // sanity: rotation baked into the global
+      expect(gt.ta === 1 && gt.tb === 0 && gt.tc === 0 && gt.td === 1).toBe(
+        false,
+      );
+
+      // Remove rotation -> simple again -> fast path applies, must reset ta/tb/tc/td.
+      node.rotation = 0;
+      node.x = 5;
+      node.y = 6;
+      node.update(1, clippingRect);
+
+      expect(node._globalIsTranslate).toBe(true);
+      expect(node.globalTransform).toBe(gt);
+      expect(gt.ta).toBe(1);
+      expect(gt.tb).toBe(0);
+      expect(gt.tc).toBe(0);
+      expect(gt.td).toBe(1);
+      expect(gt.tx).toBe(5);
+      expect(gt.ty).toBe(6);
+    });
+  });
+
+  describe('updateBoundingRect axis-alignment check', () => {
+    it('uses 4-corner bounds when one shear component is non-zero', () => {
+      // Without the && fix, the axis-aligned branch fires whenever EITHER
+      // tb or tc is 0, which produces wrong bounds for matrices with
+      // a single non-zero shear and a sign that places corners outside
+      // the (x1,y1)–(x3,y3) diagonal.
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.props.w = 100;
+      node.props.h = 100;
+      node.update(0, clippingRect);
+
+      const gt = node.globalTransform!;
+      gt.ta = 1;
+      gt.tb = 0;
+      gt.tc = -0.5;
+      gt.td = 1;
+      gt.tx = 0;
+      gt.ty = 100;
+
+      node.calculateRenderCoords();
+      node.updateBoundingRect();
+
+      // Corners with the above matrix:
+      //  TL (0, 100), TR (100, 50), BR (100, 150), BL (0, 200)
+      // Correct bounds: x in [0, 100], y in [50, 200].
+      // Axis-aligned diagonal would yield y in [100, 150] — wrong.
+      const rb = node.renderBound!;
+      expect(rb.x1).toBe(0);
+      expect(rb.x2).toBe(100);
+      expect(rb.y1).toBe(50);
+      expect(rb.y2).toBe(200);
+    });
+
+    it('still uses the diagonal bounds when both shear components are zero', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.props.w = 100;
+      node.props.h = 100;
+      node.x = 10;
+      node.y = 20;
+      node.update(0, clippingRect);
+
+      const rb = node.renderBound!;
+      expect(rb.x1).toBe(10);
+      expect(rb.y1).toBe(20);
+      expect(rb.x2).toBe(110);
+      expect(rb.y2).toBe(120);
+    });
+  });
 });
