@@ -811,6 +811,20 @@ export class CoreNode extends EventEmitter {
   public isRenderable = false;
   public renderState: CoreNodeRenderState = CoreNodeRenderState.Init;
   public isSimple = true;
+  /**
+   * `true` when `localTransform` is in identity-shape (ta=1, tb=0, tc=0, td=1)
+   * — i.e. a pure translation. Lets the simple-path `updateLocalTransform`
+   * skip redundant ta/tb/tc/td writes between frames.
+   */
+  public _localIsTranslate = false;
+  /**
+   * `true` when `globalTransform` is in identity-shape (ta=1, tb=0, tc=0, td=1).
+   * Propagates from parent: a node's global is translate-only iff the parent's
+   * global is translate-only AND the node itself is `isSimple`. Default `true`
+   * because freshly-constructed nodes have no transform applied yet, and the
+   * Stage root is configured with an identity-shape global.
+   */
+  public _globalIsTranslate = true;
 
   public worldAlpha = 1;
   public premultipliedColorTl = 0;
@@ -1089,7 +1103,18 @@ export class CoreNode extends EventEmitter {
     const { x, y } = p;
 
     if (this.isSimple) {
+      // Fast path: when localTransform is already in identity-shape
+      // (ta=1, tb=0, tc=0, td=1), only tx/ty change between frames, so we
+      // skip the 4 redundant field writes Matrix3d.translate would do.
+      // _localIsTranslate becomes stale when a node was non-simple (had
+      // rotation/scale/mount) on a previous frame — in that case do a
+      // full reset to identity-translate.
+      if (this._localIsTranslate === true) {
+        this.localTransform!.setTranslate(x, y);
+        return;
+      }
       this.localTransform = Matrix3d.translate(x, y, this.localTransform);
+      this._localIsTranslate = true;
       return;
     }
 
@@ -1157,6 +1182,8 @@ export class CoreNode extends EventEmitter {
         .translate(extraX, extraY)
         .scale(resizeModeScaleX, resizeModeScaleY);
     }
+
+    this._localIsTranslate = false;
   }
 
   updateIsSimple() {
@@ -1209,6 +1236,9 @@ export class CoreNode extends EventEmitter {
     }
 
     if (updateType & UpdateType.Global) {
+      const lt = this.localTransform!;
+      let fastPathApplied = false;
+
       if (
         USE_RTT &&
         this.parentHasRenderTexture === true &&
@@ -1225,7 +1255,10 @@ export class CoreNode extends EventEmitter {
         this.sceneGlobalTransform = Matrix3d.copy(
           parentTransform,
           this.sceneGlobalTransform,
-        ).translateOrMultiply(this.localTransform!);
+        ).translateOrMultiply(lt);
+
+        // identity * local => translate-only iff this node is simple
+        this._globalIsTranslate = this.isSimple;
       } else if (
         USE_RTT &&
         this.parentHasRenderTexture === true &&
@@ -1234,32 +1267,62 @@ export class CoreNode extends EventEmitter {
         // we're part of an RTT chain but our parent is not the main RTT node
         // so we need to propogate the sceneGlobalTransform of the parent
         // to maintain a full scene global transform for bounds detection
-        const parentSceneTransform =
-          parent.sceneGlobalTransform || this.localTransform!;
+        const parentSceneTransform = parent.sceneGlobalTransform || lt;
 
         this.sceneGlobalTransform = Matrix3d.copy(
           parentSceneTransform,
           this.sceneGlobalTransform,
-        ).translateOrMultiply(this.localTransform!);
+        ).translateOrMultiply(lt);
 
         this.globalTransform = Matrix3d.copy(
-          parent.globalTransform || this.localTransform!,
+          parent.globalTransform || lt,
           this.globalTransform,
         );
+
+        // Conservative: RTT chains rarely hit the translate fast path
+        this._globalIsTranslate = false;
       } else {
-        this.globalTransform = Matrix3d.copy(
-          parent.globalTransform || this.localTransform!,
-          this.globalTransform,
-        );
+        // Common non-RTT path
+        const parentGT = parent.globalTransform;
+        if (
+          this.isSimple === true &&
+          parentGT !== undefined &&
+          parent._globalIsTranslate === true
+        ) {
+          // Translate-only fast path: parent global and local are both pure
+          // translations, so the resulting global is also a pure translation
+          // and collapses to 2 adds on tx/ty.
+          let gt = this.globalTransform;
+          if (gt === undefined) {
+            gt = this.globalTransform = Matrix3d.identity();
+          } else if (this._globalIsTranslate === false) {
+            // Transitioning back into translate-only — reset ta/tb/tc/td
+            // that may have been left non-identity by a prior frame.
+            gt.ta = 1;
+            gt.tb = 0;
+            gt.tc = 0;
+            gt.td = 1;
+          }
+          gt.setTranslate(parentGT.tx + lt.tx, parentGT.ty + lt.ty);
+          this._globalIsTranslate = true;
+          fastPathApplied = true;
+        } else {
+          this.globalTransform = Matrix3d.copy(
+            parentGT || lt,
+            this.globalTransform,
+          );
+          this._globalIsTranslate =
+            this.isSimple === true &&
+            (parentGT === undefined || parent._globalIsTranslate === true);
+        }
       }
 
-      if (this.isSimple) {
-        this.globalTransform.translate(
-          this.localTransform!.tx,
-          this.localTransform!.ty,
-        );
-      } else {
-        this.globalTransform.translateOrMultiply(this.localTransform!);
+      if (fastPathApplied === false) {
+        if (this.isSimple) {
+          this.globalTransform!.translate(lt.tx, lt.ty);
+        } else {
+          this.globalTransform!.translateOrMultiply(lt);
+        }
       }
       this.calculateRenderCoords();
       this.updateBoundingRect();
@@ -1503,7 +1566,7 @@ export class CoreNode extends EventEmitter {
     const renderCoords = (this.sceneRenderCoords ||
       this.renderCoords) as RenderCoords;
 
-    if (transform.tb === 0 || transform.tc === 0) {
+    if (transform.tb === 0 && transform.tc === 0) {
       this.renderBound = createBound(
         renderCoords.x1,
         renderCoords.y1,
