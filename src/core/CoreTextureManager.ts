@@ -487,6 +487,12 @@ export class CoreTextureManager extends EventEmitter {
     const prefetchLimit = Math.max(1, this.numImageWorkers);
     const pending: Array<{ texture: Texture; data: Promise<unknown> }> = [];
 
+    // Helper avoids TS narrowing `texture.state` permanently after the first
+    // discriminated check — the property is mutable and can transition across
+    // awaits, so we need to re-read it freshly each time.
+    const isDead = (texture: Texture): boolean =>
+      texture.state === 'failed' || texture.state === 'freed';
+
     const fillPrefetch = () => {
       while (
         pending.length < prefetchLimit &&
@@ -496,7 +502,7 @@ export class CoreTextureManager extends EventEmitter {
         if (!texture) break;
         this.uploadTextureQueue.delete(texture);
 
-        if (texture.state === 'failed' || texture.state === 'freed') {
+        if (isDead(texture)) {
           continue;
         }
 
@@ -527,13 +533,13 @@ export class CoreTextureManager extends EventEmitter {
       // now and overlaps with this upload.
       fillPrefetch();
 
-      if (next.texture.state === 'failed' || next.texture.state === 'freed') {
+      if (isDead(next.texture)) {
         continue;
       }
 
       try {
         await next.data;
-        if (next.texture.state === 'failed' || next.texture.state === 'freed') {
+        if (isDead(next.texture)) {
           continue;
         }
         await this.uploadTexture(next.texture);
@@ -547,7 +553,7 @@ export class CoreTextureManager extends EventEmitter {
     // them — their getTextureData() is already in flight and will populate
     // `textureData` for the next tick.
     for (const { texture } of pending) {
-      if (texture.state !== 'failed' && texture.state !== 'freed') {
+      if (!isDead(texture)) {
         this.uploadTextureQueue.add(texture);
       }
     }
