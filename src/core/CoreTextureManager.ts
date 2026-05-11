@@ -281,12 +281,21 @@ export class CoreTextureManager extends EventEmitter {
       );
     } else {
       console.warn(
-        '[Lightning] Imageworker is 0 or not supported on this browser. Image loading will be slower.',
+        '[Lightning] Image worker count is 0 or workers are not supported on this browser. Image loading will be slower.',
       );
     }
 
     this.initialized = true;
     this.emit('initialized');
+
+    // Anything that arrived before initialization completed is now safe to
+    // process. Without this, queued textures would sit until the next frame
+    // tick happens to call processSome().
+    if (this.uploadTextureQueue.size > 0) {
+      this.processSome(Infinity).catch((err) => {
+        console.error('Failed to drain pre-init texture queue:', err);
+      });
+    }
   }
 
   /**
@@ -295,6 +304,9 @@ export class CoreTextureManager extends EventEmitter {
    * @param texture - The texture to upload
    */
   enqueueUploadTexture(texture: Texture): void {
+    if (texture.state === 'failed' || texture.state === 'freed') {
+      return;
+    }
     this.uploadTextureQueue.add(texture);
   }
 
@@ -381,7 +393,10 @@ export class CoreTextureManager extends EventEmitter {
         console.error(`Failed to upload texture:`, err);
         texture.setState(
           'failed',
-          new TextureError(TextureErrorCode.TEXTURE_DATA_NULL),
+          new TextureError(
+            TextureErrorCode.TEXTURE_UPLOAD_FAILED,
+            err instanceof Error ? err.message : undefined,
+          ),
         );
       });
       return;
@@ -432,7 +447,7 @@ export class CoreTextureManager extends EventEmitter {
     }
 
     const coreContext = texture.loadCtxTexture();
-    if (coreContext !== null && coreContext.state === 'loaded') {
+    if (coreContext.state === 'loaded') {
       texture.setState('loaded');
       return;
     }
@@ -468,6 +483,12 @@ export class CoreTextureManager extends EventEmitter {
       const [texture] = this.uploadTextureQueue;
       if (!texture) break;
       this.uploadTextureQueue.delete(texture);
+
+      // Skip textures that were freed or failed between enqueue and now.
+      if (texture.state === 'failed' || texture.state === 'freed') {
+        continue;
+      }
+
       try {
         if (texture.textureData === null) {
           await texture.getTextureData();

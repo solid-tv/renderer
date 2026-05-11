@@ -2,6 +2,7 @@ export enum TextureErrorCode {
   MEMORY_THRESHOLD_EXCEEDED = 'MEMORY_THRESHOLD_EXCEEDED',
   TEXTURE_DATA_NULL = 'TEXTURE_DATA_NULL',
   TEXTURE_TYPE_NOT_REGISTERED = 'TEXTURE_TYPE_NOT_REGISTERED',
+  TEXTURE_UPLOAD_FAILED = 'TEXTURE_UPLOAD_FAILED',
 }
 
 const defaultMessages: Record<TextureErrorCode, string> = {
@@ -9,6 +10,7 @@ const defaultMessages: Record<TextureErrorCode, string> = {
   [TextureErrorCode.TEXTURE_DATA_NULL]: 'Texture data is null',
   [TextureErrorCode.TEXTURE_TYPE_NOT_REGISTERED]:
     'Texture type is not registered',
+  [TextureErrorCode.TEXTURE_UPLOAD_FAILED]: 'Texture upload failed',
 };
 
 export class TextureError extends Error {

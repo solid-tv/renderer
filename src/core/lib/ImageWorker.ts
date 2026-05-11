@@ -67,7 +67,7 @@ function createImageWorker() {
 
         var blob = xhr.response;
         var withAlphaChannel =
-          premultiplyAlpha !== undefined
+          premultiplyAlpha !== undefined && premultiplyAlpha !== null
             ? premultiplyAlpha
             : hasAlphaChannel(blob.type);
 
@@ -83,7 +83,7 @@ function createImageWorker() {
             imageOrientation: 'none',
           })
             .then(function (data) {
-              resolve({ data, premultiplyAlpha: premultiplyAlpha });
+              resolve({ data: data, premultiplyAlpha: withAlphaChannel });
             })
             .catch(function (error) {
               reject(error);
@@ -91,13 +91,13 @@ function createImageWorker() {
           return;
         } else if (
           supportsOptionsCreateImageBitmap === false &&
-          supportsOptionsCreateImageBitmap === false
+          supportsFullCreateImageBitmap === false
         ) {
           // Fallback for browsers that do not support createImageBitmap with options
           // this is supported for Chrome v50 to v52/54 that doesn't support options
           createImageBitmap(blob)
             .then(function (data) {
-              resolve({ data, premultiplyAlpha: premultiplyAlpha });
+              resolve({ data: data, premultiplyAlpha: withAlphaChannel });
             })
             .catch(function (error) {
               reject(error);
@@ -109,7 +109,7 @@ function createImageWorker() {
             imageOrientation: 'none',
           })
             .then(function (data) {
-              resolve({ data, premultiplyAlpha: premultiplyAlpha });
+              resolve({ data: data, premultiplyAlpha: withAlphaChannel });
             })
             .catch(function (error) {
               reject(error);
@@ -156,7 +156,6 @@ function createImageWorker() {
 /* eslint-enable */
 
 export class ImageWorkerManager {
-  imageWorkersEnabled = true;
   messageManager: Record<number, MessageCallback> = {};
   workers: Worker[] = [];
   workerLoad: number[] = [];
@@ -172,6 +171,8 @@ export class ImageWorkerManager {
     );
     this.workers.forEach((worker, index) => {
       worker.onmessage = (event) => this.handleMessage(event, index);
+      worker.onerror = (event) => this.handleWorkerError(event, index);
+      worker.onmessageerror = (event) => this.handleWorkerError(event, index);
     });
   }
 
@@ -192,6 +193,25 @@ export class ImageWorkerManager {
         resolve(data);
       }
     }
+  }
+
+  private handleWorkerError(event: Event | ErrorEvent, workerIndex: number) {
+    const message =
+      event instanceof ErrorEvent && event.message
+        ? event.message
+        : 'Image worker encountered an unrecoverable error';
+
+    // Reject all pending requests; we cannot map a worker-level crash to a
+    // specific message id, so fail everything outstanding to avoid hangs.
+    for (const id in this.messageManager) {
+      const msg = this.messageManager[id];
+      if (msg) {
+        const [, reject] = msg;
+        delete this.messageManager[id];
+        reject(new Error(message));
+      }
+    }
+    this.workerLoad[workerIndex] = 0;
   }
 
   private createWorkers(
@@ -224,19 +244,22 @@ export class ImageWorkerManager {
     const blob: Blob = new Blob([workerCode], {
       type: 'application/javascript',
     });
-    const blobURL: string = (self.URL ? URL : webkitURL).createObjectURL(blob);
+    const urlFactory = self.URL ? URL : webkitURL;
+    const blobURL: string = urlFactory.createObjectURL(blob);
     const workers: Worker[] = [];
     for (let i = 0; i < numWorkers; i++) {
       workers.push(new Worker(blobURL));
       this.workerLoad.push(0);
     }
+    // Workers retain the script; the URL itself is no longer needed.
+    urlFactory.revokeObjectURL(blobURL);
     return workers;
   }
 
   private getNextWorkerIndex(): number {
     if (this.workers.length === 0) return -1;
 
-    let minLoad = 99;
+    let minLoad = Infinity;
     let workerIndex = 0;
 
     for (let i = 0; i < this.workers.length; i++) {
@@ -264,26 +287,26 @@ export class ImageWorkerManager {
   ): Promise<TextureData> {
     return new Promise((resolve, reject) => {
       try {
-        if (this.workers) {
-          const id = this.nextId++;
-          this.messageManager[id] = [resolve, reject];
-          const nextWorkerIndex = this.getNextWorkerIndex();
-
-          if (nextWorkerIndex !== -1) {
-            const worker = this.workers[nextWorkerIndex];
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            this.workerLoad[nextWorkerIndex]!++;
-            worker!.postMessage({
-              id,
-              src: src,
-              premultiplyAlpha,
-              sx,
-              sy,
-              sw,
-              sh,
-            });
-          }
+        const nextWorkerIndex = this.getNextWorkerIndex();
+        if (nextWorkerIndex === -1) {
+          reject(new Error('No image workers available'));
+          return;
         }
+
+        const id = this.nextId++;
+        this.messageManager[id] = [resolve, reject];
+        const worker = this.workers[nextWorkerIndex];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        this.workerLoad[nextWorkerIndex]!++;
+        worker!.postMessage({
+          id,
+          src: src,
+          premultiplyAlpha,
+          sx,
+          sy,
+          sw,
+          sh,
+        });
       } catch (error) {
         reject(error);
       }

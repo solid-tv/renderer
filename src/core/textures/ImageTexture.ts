@@ -147,11 +147,22 @@ export class ImageTexture extends Texture {
       data: HTMLImageElement | null;
       premultiplyAlpha: boolean;
     }>((resolve, reject) => {
+      let objectUrl: string | null = null;
+
+      const cleanup = () => {
+        if (objectUrl !== null) {
+          URL.revokeObjectURL(objectUrl);
+          objectUrl = null;
+        }
+      };
+
       img.onload = () => {
+        cleanup();
         resolve({ data: img, premultiplyAlpha: hasAlpha });
       };
 
       img.onerror = (err) => {
+        cleanup();
         const errorMessage =
           err instanceof Error
             ? err.message
@@ -162,7 +173,8 @@ export class ImageTexture extends Texture {
       };
 
       if (src instanceof Blob) {
-        img.src = URL.createObjectURL(src);
+        objectUrl = URL.createObjectURL(src);
+        img.src = objectUrl;
       } else {
         img.src = src;
       }
@@ -218,10 +230,11 @@ export class ImageTexture extends Texture {
 
   async loadImage(src: string) {
     const { premultiplyAlpha, sx, sy, sw, sh } = this.props;
+    const isBase64 = isBase64Image(src);
 
     if (this.txManager.hasCreateImageBitmap === true) {
       if (
-        isBase64Image(src) === false &&
+        isBase64 === false &&
         this.txManager.hasWorker === true &&
         this.txManager.imageWorkerManager !== null
       ) {
@@ -235,15 +248,9 @@ export class ImageTexture extends Texture {
         );
       }
 
-      let blob;
-
-      if (isBase64Image(src) === true) {
-        blob = dataURIToBlob(src);
-      } else {
-        blob = await fetchJson(src, 'blob').then(
-          (response) => response as Blob,
-        );
-      }
+      const blob = isBase64
+        ? dataURIToBlob(src)
+        : ((await fetchJson(src, 'blob')) as Blob);
 
       return this.createImageBitmap(blob, premultiplyAlpha, sx, sy, sw, sh);
     }
@@ -362,11 +369,9 @@ export class ImageTexture extends Texture {
     }`;
 
     if (props.sh !== null && props.sw !== null) {
-      cacheKey += ',';
-      cacheKey += props.sx ?? '';
-      cacheKey += props.sy ?? '';
-      cacheKey += props.sw || '';
-      cacheKey += props.sh || '';
+      cacheKey += `,${props.sx ?? ''},${props.sy ?? ''},${props.sw || ''},${
+        props.sh || ''
+      }`;
     }
 
     return cacheKey;
