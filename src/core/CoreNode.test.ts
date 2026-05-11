@@ -902,4 +902,73 @@ describe('set color()', () => {
       expect(node._hasContainResize).toBe(false);
     });
   });
+
+  describe('children update loop branches', () => {
+    it('inherited childUpdateType is applied even to children with updateType=0', () => {
+      const root = new CoreNode(stage, defaultProps());
+      root.globalTransform = Matrix3d.identity();
+      root.worldAlpha = 1;
+
+      const parent = new CoreNode(stage, defaultProps({ parent: root }));
+      parent.alpha = 1;
+      parent.w = 100;
+      parent.h = 100;
+
+      const child = new CoreNode(stage, defaultProps({ parent }));
+      child.alpha = 1;
+      child.w = 100;
+      child.h = 100;
+
+      // Bring both to steady state then clear pending work on the child.
+      parent.update(0, clippingRect);
+      child.updateType = 0;
+
+      // Mark parent dirty with WorldAlpha — it should cascade into the
+      // child via the `childUpdateType !== 0` loop branch, even though
+      // the child started this frame with no pending work.
+      parent.alpha = 0.5;
+      parent.update(1, clippingRect);
+
+      expect(child.worldAlpha).toBeCloseTo(0.5, 5);
+    });
+
+    it('skips children with no pending work when there is nothing to inherit', () => {
+      const root = new CoreNode(stage, defaultProps());
+      root.globalTransform = Matrix3d.identity();
+      root.worldAlpha = 1;
+
+      const parent = new CoreNode(stage, defaultProps({ parent: root }));
+      parent.alpha = 1;
+      parent.w = 100;
+      parent.h = 100;
+
+      const childA = new CoreNode(stage, defaultProps({ parent }));
+      childA.alpha = 1;
+      childA.w = 100;
+      childA.h = 100;
+      const childB = new CoreNode(stage, defaultProps({ parent }));
+      childB.alpha = 1;
+      childB.w = 100;
+      childB.h = 100;
+
+      parent.update(0, clippingRect);
+      childA.updateType = 0;
+      childB.updateType = 0;
+
+      // Mark only childB dirty. Force parent into the Children branch
+      // without seeding any inherited bits, so the loop should take the
+      // `childUpdateType === 0` branch and only walk dirty children.
+      childB.setUpdateType(UpdateType.Local);
+      parent.updateType |= UpdateType.Children;
+      parent.childUpdateType = 0;
+
+      const spyA = vi.spyOn(childA, 'update');
+      const spyB = vi.spyOn(childB, 'update');
+
+      parent.update(1, clippingRect);
+
+      expect(spyA).not.toHaveBeenCalled();
+      expect(spyB).toHaveBeenCalledTimes(1);
+    });
+  });
 });

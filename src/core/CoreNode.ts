@@ -1469,18 +1469,30 @@ export class CoreNode extends EventEmitter {
         childClippingRect = NO_CLIPPING_RECT;
       }
 
-      for (let i = 0, length = this.children.length; i < length; i++) {
-        const child = this.children[i] as CoreNode;
-
-        if (childUpdateType !== 0) {
+      const children = this.children;
+      const length = children.length;
+      if (childUpdateType !== 0) {
+        // Specialized loop: OR-in the inherited update bits for every child,
+        // then update if non-zero. Avoids the per-iter `childUpdateType !== 0`
+        // compare.
+        for (let i = 0; i < length; i++) {
+          const child = children[i] as CoreNode;
           child.updateType |= childUpdateType;
+          if (child.updateType === 0) {
+            continue;
+          }
+          child.update(delta, childClippingRect);
         }
-
-        if (child.updateType === 0) {
-          continue;
+      } else {
+        // Specialized loop: nothing to inherit, so only walk children that
+        // already have pending work of their own.
+        for (let i = 0; i < length; i++) {
+          const child = children[i] as CoreNode;
+          if (child.updateType === 0) {
+            continue;
+          }
+          child.update(delta, childClippingRect);
         }
-
-        child.update(delta, childClippingRect);
       }
     }
 
