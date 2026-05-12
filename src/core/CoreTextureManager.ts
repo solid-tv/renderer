@@ -159,6 +159,73 @@ export interface TextureOptions {
   resizeMode?: ResizeModeOptions;
 }
 
+/**
+ * Insertion-ordered, dedup'd FIFO queue used by the texture upload
+ * pipeline.
+ *
+ * Backed by an array (for ordered traversal without per-call iterator
+ * allocation) plus a Set (for O(1) membership and cancel-by-reference).
+ * Removed entries are tombstoned in the array — they're skipped on the
+ * next `shift()`, and the array is compacted once the consumed prefix
+ * grows large enough to be worth reclaiming.
+ */
+class TextureUploadQueue {
+  private list: Texture[] = [];
+  private membership: Set<Texture> = new Set();
+  private head = 0;
+
+  get size(): number {
+    return this.membership.size;
+  }
+
+  has(texture: Texture): boolean {
+    return this.membership.has(texture);
+  }
+
+  add(texture: Texture): void {
+    if (this.membership.has(texture)) {
+      return;
+    }
+    this.membership.add(texture);
+    this.list.push(texture);
+  }
+
+  delete(texture: Texture): boolean {
+    return this.membership.delete(texture);
+  }
+
+  /**
+   * Remove and return the oldest live entry, or `undefined` if empty.
+   */
+  shift(): Texture | undefined {
+    const list = this.list;
+    const membership = this.membership;
+    while (this.head < list.length) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const texture = list[this.head++]!;
+      if (membership.has(texture)) {
+        membership.delete(texture);
+        this.compactIfNeeded();
+        return texture;
+      }
+    }
+    // Fully drained — reset for the next batch.
+    this.head = 0;
+    list.length = 0;
+    return undefined;
+  }
+
+  private compactIfNeeded(): void {
+    // Drop the consumed prefix once it's substantial in absolute terms
+    // and at least half the array. Avoids growing the array unboundedly
+    // when shift() runs faster than the queue refills.
+    if (this.head >= 64 && this.head >= this.list.length >> 1) {
+      this.list = this.list.slice(this.head);
+      this.head = 0;
+    }
+  }
+}
+
 export class CoreTextureManager extends EventEmitter {
   /**
    * Map of textures by cache key
@@ -166,17 +233,12 @@ export class CoreTextureManager extends EventEmitter {
   keyCache: Map<string, Texture> = new Map();
 
   /**
-   * Map of cache keys by texture
-   */
-  inverseKeyCache: WeakMap<Texture, string> = new WeakMap();
-
-  /**
    * Map of texture constructors by their type name
    */
   txConstructors: Partial<TextureMap> = {};
 
   public maxRetryCount: number;
-  private uploadTextureQueue: Set<Texture> = new Set();
+  private uploadTextureQueue: TextureUploadQueue = new TextureUploadQueue();
   private initialized = false;
   private stage: Stage;
   private numImageWorkers: number;
@@ -494,13 +556,9 @@ export class CoreTextureManager extends EventEmitter {
       texture.state === 'failed' || texture.state === 'freed';
 
     const fillPrefetch = () => {
-      while (
-        pending.length < prefetchLimit &&
-        this.uploadTextureQueue.size > 0
-      ) {
-        const [texture] = this.uploadTextureQueue;
-        if (!texture) break;
-        this.uploadTextureQueue.delete(texture);
+      while (pending.length < prefetchLimit) {
+        const texture = this.uploadTextureQueue.shift();
+        if (texture === undefined) break;
 
         if (isDead(texture)) {
           continue;
@@ -570,9 +628,8 @@ export class CoreTextureManager extends EventEmitter {
    * @param cacheKey Cache key for the texture
    */
   initTextureToCache(texture: Texture, cacheKey: string) {
-    const { keyCache, inverseKeyCache } = this;
-    keyCache.set(cacheKey, texture);
-    inverseKeyCache.set(texture, cacheKey);
+    this.keyCache.set(cacheKey, texture);
+    texture.cacheKey = cacheKey;
   }
 
   /**
@@ -593,10 +650,10 @@ export class CoreTextureManager extends EventEmitter {
    * @param texture
    */
   removeTextureFromCache(texture: Texture) {
-    const { inverseKeyCache, keyCache } = this;
-    const cacheKey = inverseKeyCache.get(texture);
-    if (cacheKey) {
-      keyCache.delete(cacheKey);
+    const cacheKey = texture.cacheKey;
+    if (cacheKey !== null) {
+      this.keyCache.delete(cacheKey);
+      texture.cacheKey = null;
     }
   }
 
