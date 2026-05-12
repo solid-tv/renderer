@@ -153,6 +153,13 @@ export abstract class Texture extends EventEmitter {
 
   public textureData: TextureData | null = null;
 
+  /**
+   * Cache key under which this texture is registered in the
+   * {@link CoreTextureManager} keyCache, or `null` if the texture is
+   * not cached. Owned by the texture manager.
+   */
+  public cacheKey: string | null = null;
+
   public memUsed = 0;
 
   /**
