@@ -12,10 +12,7 @@ import {
 import { isSvgImage, loadSvg } from '../lib/textureSvg.js';
 import { fetchJson } from '../lib/utils.js';
 import type { Platform } from '../platforms/Platform.js';
-import {
-  ENABLE_COMPRESSED_TEXTURES,
-  isProductionEnvironment,
-} from '../../utils.js';
+import { ENABLE_COMPRESSED_TEXTURES } from '../../utils.js';
 
 /**
  * Properties of the {@link ImageTexture}

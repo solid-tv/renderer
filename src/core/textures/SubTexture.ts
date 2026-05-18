@@ -1,4 +1,3 @@
-import type { Dimensions } from '../../common/CommonTypes.js';
 import { assertTruthy } from '../../utils.js';
 import type { CoreTextureManager } from '../CoreTextureManager.js';
 import { ImageTexture } from './ImageTexture.js';
@@ -8,7 +7,6 @@ import {
   type TextureData,
   type TextureFailedEventHandler,
   type TextureLoadedEventHandler,
-  type TextureState,
 } from './Texture.js';
 
 let subTextureId = 0;
