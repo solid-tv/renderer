@@ -83,7 +83,7 @@ export const findChildIndexById = (
   for (let i = 0; i < children.length; i++) {
     const child = children[i]!;
 
-    // @ts-ignore - accessing protected property
+    // @ts-expect-error - accessing protected property
     if (child._id === node._id) {
       return i;
     }

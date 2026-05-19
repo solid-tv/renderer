@@ -1,5 +1,3 @@
-import type { NormalizedFontMetrics } from './TextRenderer.js';
-
 const invisibleChars = /[\u200B\u200C\u200D\uFEFF\u00AD\u2060]/g;
 
 /**

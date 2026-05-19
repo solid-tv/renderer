@@ -100,10 +100,7 @@ at start up so they are ready when your application is rendered.
 ```ts
 import { RendererMain } from '@solidtv/renderer';
 
-import {
-  WebGlCoreRenderer,
-  SdfTextRenderer,
-} from '@solidtv/renderer/webgl';
+import { WebGlCoreRenderer, SdfTextRenderer } from '@solidtv/renderer/webgl';
 import { CanvasTextRenderer } from '@solidtv/renderer/canvas';
 
 const renderer = new RendererMain(
