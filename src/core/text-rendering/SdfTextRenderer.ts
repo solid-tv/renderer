@@ -160,7 +160,6 @@ const renderQuads = (
 
   // --- Cache-miss slow path -----------------------------------------------
   const startIdx = webGlRenderer.sdfBufferIdx;
-  debugger;
   webGlRenderer.addSdfQuads(
     layout.glyphs,
     layout.fontScale,
