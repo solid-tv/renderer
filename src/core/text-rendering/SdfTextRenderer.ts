@@ -146,12 +146,12 @@ const renderQuads = (
         cache.vertices,
         cache.glyphCount,
         ctxTexture,
-        renderProps.clippingRect as RectWithValid,
+        renderProps.clippingRect,
         renderProps.worldAlpha,
         layout.width,
         layout.height,
         renderProps.parentHasRenderTexture,
-        renderProps.framebufferDimensions as Dimensions | null,
+        renderProps.framebufferDimensions,
         sdfShader!,
       );
       return null;
@@ -160,7 +160,7 @@ const renderQuads = (
 
   // --- Cache-miss slow path -----------------------------------------------
   const startIdx = webGlRenderer.sdfBufferIdx;
-
+  debugger;
   webGlRenderer.addSdfQuads(
     layout.glyphs,
     layout.fontScale,
@@ -170,11 +170,11 @@ const renderQuads = (
     layout.distanceRange,
     ctxTexture,
 
-    renderProps.clippingRect as RectWithValid,
+    renderProps.clippingRect,
     layout.width,
     layout.height,
     renderProps.parentHasRenderTexture,
-    renderProps.framebufferDimensions as Dimensions | null,
+    renderProps.framebufferDimensions,
     sdfShader!,
   );
 
