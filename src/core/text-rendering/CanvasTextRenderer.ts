@@ -109,7 +109,10 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
   const font = `${fontStyle} ${fontSize}px Unknown, ${fontFamily}`;
   // Get font metrics and calculate line height
   measureContext.font = font;
-  measureContext.textBaseline = 'hanging';
+  // The layout engine emits line[4] as the alphabetic baseline Y, matching
+  // CSS line box layout. Both contexts must use 'alphabetic' so fillText draws
+  // the baseline exactly at line[4].
+  measureContext.textBaseline = 'alphabetic';
 
   const metrics = CanvasFontHandler.getFontMetrics(fontFamily, fontSize);
 
@@ -150,7 +153,7 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
   const a = color & 0xff;
   context.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
   context.font = font;
-  context.textBaseline = 'hanging';
+  context.textBaseline = 'alphabetic';
 
   // Performance optimization for large fonts
   if (fontSize >= 128) {
