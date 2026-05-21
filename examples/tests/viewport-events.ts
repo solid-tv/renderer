@@ -1,20 +1,48 @@
+import type { RendererMain } from '@lightningjs/renderer';
 import type { ExampleSettings } from '../common/ExampleSettings.js';
+
+/**
+ * Wait until the renderer has drained all pending scene updates and fires
+ * `'idle'`. Each `page(i)` mutation in this test kicks off a cascade —
+ * position change → bounds events → status text mutations → text re-layout
+ * → next render — that takes multiple frames to settle. Snapshotting before
+ * the cascade finishes captures intermediate state and produces flaky diffs.
+ *
+ * A short timeout fallback prevents the test from hanging if a mutation
+ * happens to be a no-op (e.g. setting clipping to its current value).
+ */
+const waitForIdle = (renderer: RendererMain, timeoutMs = 500): Promise<void> =>
+  new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      renderer.off('idle', onIdle);
+      resolve();
+    };
+    const onIdle = () => finish();
+    const timer = setTimeout(finish, timeoutMs);
+    renderer.on('idle', onIdle);
+  });
 
 export async function automation(settings: ExampleSettings) {
   const TESTPAGES = 17;
-  const testPageArray: number[] = [];
-  for (let i = 1; i < TESTPAGES; i++) {
-    testPageArray.push(i);
-  }
 
   const page = await test(settings);
-  // i = 0
+
+  // i = 0 - let the initial scene settle before the first capture so font
+  // load, atlas upload, and the first bounds-event cascade are all complete.
+  await waitForIdle(settings.renderer);
   await settings.snapshot();
 
   let testIdx = 1;
   const testPage = async () => {
     console.log('Testing ', testIdx);
     page(testIdx);
+    await waitForIdle(settings.renderer);
     await settings.snapshot();
 
     if (testIdx >= TESTPAGES) {
