@@ -9,6 +9,14 @@ import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 
 /**
+ * Fraction of total pixels in a snapshot that are allowed to differ before a
+ * comparison is reported as a failure. Tuned to absorb sub-pixel SDF glyph
+ * edge jitter (typically tens to a few hundred pixels per frame across
+ * Docker rebuilds) while still catching any meaningful UI change.
+ */
+const MAX_DIFF_RATIO = 0.0005; // 0.05% of frame pixels
+
+/**
  * Keep in sync with `examples/common/ExampleSettings.ts`.
  * `width`/`height` (not `w`/`h`) so the object can be handed directly to
  * Playwright's `page.screenshot({ clip })`, which expects this exact shape.
@@ -200,11 +208,23 @@ export function compareBuffers(
     { threshold: 0.1 },
   );
 
-  const doesMatch = count === 0;
+  // Even with AA detection enabled, pixelmatch will misclassify a small
+  // number of glyph-edge pixels as "real" diffs because SDF text positions
+  // are subject to float-precision drift across builds (the Chromium
+  // anti-aliasing flags target Canvas text and do not affect our WebGL
+  // SDF path). Allow a tiny absolute count of differing pixels so this
+  // noise doesn't fail tests while still catching anything larger - for
+  // a 1280x720 frame this caps "acceptable" drift at ~460 pixels, well
+  // below a missing word or shifted rectangle but above per-glyph AA
+  // jitter.
+  const maxAllowedDiff = Math.floor(width * height * MAX_DIFF_RATIO);
+  const doesMatch = count <= maxAllowedDiff;
 
   return {
     doesMatch,
     diffImageBuffer: doesMatch ? undefined : diff,
-    reason: doesMatch ? undefined : `${count} pixels differ`,
+    reason: doesMatch
+      ? undefined
+      : `${count} pixels differ (tolerance ${maxAllowedDiff})`,
   };
 }
