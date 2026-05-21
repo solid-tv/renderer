@@ -37,7 +37,7 @@ const font: FontHandler = SdfFontHandler;
 const layoutCache = new Map<string, TextLayout>();
 
 const getLayoutCacheKey = (props: CoreTextNodeProps): string =>
-  `${props.fontFamily}-${props.fontSize}-${props.letterSpacing}-${props.lineHeight}-${props.maxHeight}-${props.maxWidth}-${props.maxLines}-${props.textAlign}-${props.wordBreak}-${props.overflowSuffix}-${props.text}`;
+  `${props.fontFamily}-${props.fontStyle}-${props.fontSize}-${props.letterSpacing}-${props.lineHeight}-${props.maxHeight}-${props.maxWidth}-${props.maxLines}-${props.textAlign}-${props.wordBreak}-${props.overflowSuffix}-${props.text}`;
 
 /**
  * SDF text renderer using MSDF/SDF fonts with WebGL
@@ -219,9 +219,14 @@ const generateTextLayout = (
   const fontData = fontCache.data;
   const commonFontData = fontData.common;
   const designFontSize = fontData.info.size;
-  const designLineHeight = commonFontData.lineHeight;
-  const lineHeight =
-    props.lineHeight || (designLineHeight * fontSize) / designFontSize;
+  // common.base = distance from BMFont line-box top to the alphabetic baseline,
+  // in atlas design units. Used to convert per-glyph yoffset (BMFont top -> glyph top)
+  // into baseline-relative placement.
+  const atlasBase = commonFontData.base;
+  // When the user does not specify lineHeight, fall back to the engine's
+  // 'normal' line height (ascender + lineGap - descender) computed inside
+  // mapTextLayout via the supplied metrics. Passing 0 below triggers that path.
+  const lineHeight = props.lineHeight;
 
   const atlasWidth = commonFontData.scaleW;
   const atlasHeight = commonFontData.scaleH;
@@ -265,15 +270,16 @@ const generateTextLayout = (
 
   const glyphs: GlyphLayout[] = [];
   let currentX = 0;
-  let currentY = 0;
+  let baselineY = 0;
   for (let i = 0; i < lineAmount; i++) {
     const line = lines[i] as TextLineStruct;
     const textLine = line[0];
     const textLineLength = textLine.length;
     let prevGlyphId = 0;
     currentX = line[3];
-    //convert Y coord to vertex value
-    currentY = line[4] / fontScale;
+    // line[4] is the alphabetic baseline Y in screen px. Convert to atlas
+    // design units (where glyph.yoffset and atlasBase live).
+    baselineY = line[4] / fontScale;
 
     for (let j = 0; j < textLineLength; j++) {
       const codepoint = textLine.codePointAt(j) as number;
@@ -316,10 +322,13 @@ const generateTextLayout = (
       // Apply pair kerning before placing this glyph.
       currentX += kerning;
 
-      // Calculate glyph position and atlas coordinates (in design units)
+      // Glyph position in atlas design units. yoffset is measured from the
+      // BMFont line-box top; subtracting atlasBase re-anchors it relative to
+      // the alphabetic baseline so fonts with different BMFont 'base' values
+      // share the same on-screen baseline.
       const glyphLayout: GlyphLayout = {
         x: currentX + glyph.xoffset,
-        y: currentY + glyph.yoffset,
+        y: baselineY + glyph.yoffset - atlasBase,
         width: glyph.width,
         height: glyph.height,
         atlasX: glyph.x * invAtlasWidth,
@@ -334,7 +343,6 @@ const generateTextLayout = (
       currentX += glyph.xadvance + letterSpacing;
       prevGlyphId = glyph.id;
     }
-    currentY += lineHeightPx;
   }
 
   // Convert final dimensions to pixel space for the layout

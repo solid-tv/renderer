@@ -63,12 +63,16 @@ export const mapTextLayout = (
 ): TextLayoutStruct => {
   const ascPx = metrics.ascender;
   const descPx = metrics.descender;
+  const lineGapPx = metrics.lineGap;
 
-  const bareLineHeight = ascPx - descPx;
+  // Default line height matches CSS 'normal': ascender + lineGap - descender.
+  // descPx is negative for descents below the baseline.
+  const bareLineHeight = ascPx - descPx + lineGapPx;
   const lineHeightPx =
     lineHeight <= 3 ? lineHeight * bareLineHeight : lineHeight;
-  const lineHeightDelta = lineHeightPx - bareLineHeight;
-  const halfDelta = lineHeightDelta * 0.5;
+  // Half-leading: extra space split evenly above the ascent and below the descent.
+  // Negative when the user requests a line height smaller than the font's own extent.
+  const halfLeading = (lineHeightPx - bareLineHeight) * 0.5;
 
   let effectiveMaxLines = maxLines;
 
@@ -107,12 +111,27 @@ export const mapTextLayout = (
           effectiveMaxLines,
         );
 
-  let effectiveLineAmount = lines.length;
+  const effectiveLineAmount = lines.length;
   let effectiveMaxWidth = 0;
+
+  // CSS letter-spacing applies between characters, not after the trailing one.
+  // measureText accumulates one advance + letterSpacing per glyph, so each
+  // line carries one extra trailing letterSpacing. Trim it once per line for
+  // alignment / reported width purposes. Wrap decisions inside the loops above
+  // intentionally still use the un-trimmed width (CSS engines also consider
+  // trailing letter-spacing during break decisions; only the rendered line
+  // width is trimmed).
+  if (letterSpacing !== 0) {
+    for (let i = 0; i < effectiveLineAmount; i++) {
+      const line = lines[i]!;
+      if (line[0].length > 0) {
+        line[1] -= letterSpacing;
+      }
+    }
+  }
 
   if (effectiveLineAmount > 0) {
     effectiveMaxWidth = lines[0]![1];
-    //check for longest line
     if (effectiveLineAmount > 1) {
       for (let i = 1; i < effectiveLineAmount; i++) {
         effectiveMaxWidth = Math.max(effectiveMaxWidth, lines[i]![1]);
@@ -134,12 +153,13 @@ export const mapTextLayout = (
 
   const effectiveMaxHeight = effectiveLineAmount * lineHeightPx;
 
-  let firstBaseLine = halfDelta;
-
-  const startY = firstBaseLine;
+  // line[4] stores the alphabetic baseline Y of each line in screen px.
+  // The first baseline sits half-leading + ascender below the line box top,
+  // matching CSS line box layout.
+  const firstBaselineY = halfLeading + ascPx;
   for (let i = 0; i < effectiveLineAmount; i++) {
     const line = lines[i] as TextLineStruct;
-    line[4] = startY + lineHeightPx * i;
+    line[4] = firstBaselineY + lineHeightPx * i;
   }
 
   return [
