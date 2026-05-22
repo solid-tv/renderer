@@ -30,6 +30,11 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
   const SAMPLES: Array<{ label: string; text: string }> = [
     { label: 'caps', text: 'TXYZ' },
     { label: 'mixed', text: 'Abcg' },
+    // Mixed-case word with no descenders (caps + lowercase ascenders +
+    // x-height-only letters). Useful for spotting whether lowercase letters
+    // sit comfortably with capitals when the descender tail isn't present
+    // to pull the eye downward.
+    { label: 'no desc.', text: 'Acme' },
     { label: 'descend.', text: 'gjpqy' },
     { label: 'digits', text: '1234' },
     { label: 'punct.', text: ',._—' },
