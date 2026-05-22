@@ -9,4 +9,5 @@ export { Shadow } from '../src/core/shaders/webgl/Shadow.js';
 export { HolePunch } from '../src/core/shaders/webgl/HolePunch.js';
 export { LinearGradient } from '../src/core/shaders/webgl/LinearGradient.js';
 export { RadialGradient } from '../src/core/shaders/webgl/RadialGradient.js';
+export { RadialProgress } from '../src/core/shaders/webgl/RadialProgress.js';
 export { Default } from '../src/core/shaders/webgl/Default.js';
