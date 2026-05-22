@@ -41,24 +41,41 @@ export interface FontMetrics {
    * The number of font units per 1 EM.
    */
   unitsPerEm: number;
+  /**
+   * The distance, in font units, from the baseline to the top of an uppercase
+   * letter (OS/2 sCapHeight).
+   *
+   * Used by the layout engine to vertically center capital letters on each
+   * line's geometric mid-line. When absent, the SDF backend derives this
+   * value from glyph `H` (id 72) in the BMFont atlas; the Canvas backend
+   * falls back to `0.7 × ascender` (a generic Latin-font approximation).
+   */
+  capHeight?: number;
 }
 
 /**
- * Normalized font metrics where values are expressed as a fraction of 1 EM.
+ * Normalized font metrics where values are expressed in pixels at the
+ * configured font size (em-px).
  */
 export interface NormalizedFontMetrics {
   /**
-   * The distance, as a fraction of 1 EM, from the baseline to the highest point of the font.
+   * The distance, in em-px, from the baseline to the highest point of the font.
    */
   ascender: number;
   /**
-   * The distance, as a fraction of 1 EM, from the baseline to the lowest point of the font.
+   * The distance, in em-px, from the baseline to the lowest point of the font.
    */
   descender: number;
   /**
-   * The additional space used in the calculation of the default line height as a fraction of 1 EM
+   * The additional space used in the calculation of the default line height, in em-px.
    */
   lineGap: number;
+  /**
+   * The distance, in em-px, from the baseline to the top of an uppercase letter.
+   * Always populated; derived or approximated when {@link FontMetrics.capHeight}
+   * is not provided by the caller.
+   */
+  capHeight: number;
 }
 
 /**
