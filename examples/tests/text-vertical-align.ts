@@ -215,7 +215,11 @@ function generateVerticalAlignTest(
         const makeBoxedTextNode = async (
           verticalAlign: 'top' | 'middle' | 'bottom',
         ) => {
-          const node = renderer.createTextNode({ ...baseProps, verticalAlign });
+          const node = renderer.createTextNode({
+            ...baseProps,
+            verticalAlign,
+            parent: rowNode,
+          });
           await waitForLoadedDimensions(node);
           node.h = CONTAINER_SIZE;
           return node;
