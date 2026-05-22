@@ -374,17 +374,20 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    * mid-line. This is engine-wide and intentionally not exposed per node —
    * mixing anchor models within one app produces visually inconsistent text.
    *
-   * - `'cap'` (default): capital letters and digits sit centered on the line.
-   *   Best fit for UI text (button labels, headings, badges); descenders on
-   *   words like 'gjpq' hang slightly below center, matching CSS button
-   *   behavior in browsers.
+   * - `'optical'` (default): the mean of cap-height and x-height is centered.
+   *   Reads visually centered for mixed-case UI text like "Button"; the
+   *   sweet spot between `'cap'` (low for lowercase-heavy) and `'x'` (high
+   *   for headings). Matches macOS/iOS control behavior.
+   * - `'cap'`: capital letters and digits sit centered on the line. Use
+   *   when content is mostly uppercase or numeric (timers, badges); mixed-
+   *   case "Button" can read slightly low.
    * - `'x'`: lowercase x-height is centered. Better for running body text;
    *   capitals appear slightly high in headings.
    * - `'linebox'`: legacy mode. Centers the asc/lineGap/desc rectangle.
    *   Mathematically tidy but visually unbalanced because most Latin fonts
    *   have asymmetric asc/desc ratios.
    *
-   * @defaultValue `'cap'`
+   * @defaultValue `'optical'`
    */
   textBaselineMode: TextBaselineMode;
 
@@ -555,7 +558,7 @@ export class RendererMain extends EventEmitter {
       renderEngine: settings.renderEngine,
       quadBufferSize: settings.quadBufferSize ?? 4 * 1024 * 1024,
       fontEngines: settings.fontEngines ?? [],
-      textBaselineMode: settings.textBaselineMode ?? 'cap',
+      textBaselineMode: settings.textBaselineMode ?? 'optical',
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
       createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
