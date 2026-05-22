@@ -252,9 +252,10 @@ const processFontData = (
     // normalizeFontMetrics.
   }
 
-  // Same derivation for x-height using glyph 'x' (id 120). Only consumed
-  // when `RendererMainSettings.textBaselineMode === 'x'`; otherwise the
-  // 0.5 × ascender fallback inside `normalizeFontMetrics` is sufficient.
+  // Same derivation for x-height using glyph 'x' (id 120). Consumed by
+  // both `textBaselineMode === 'x'` and `'optical'` (which uses the mean
+  // of cap-height and x-height); the 0.5 × ascender fallback inside
+  // `normalizeFontMetrics` covers fonts that ship without an 'x' glyph.
   if (metrics.xHeight === undefined) {
     const xGlyph = glyphMap.get(120); // 'x'
     if (xGlyph !== undefined) {

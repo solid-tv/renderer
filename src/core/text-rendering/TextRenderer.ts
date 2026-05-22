@@ -21,17 +21,20 @@ export type TextRenderers = 'canvas' | 'sdf';
  * cannot be overridden per node — see the engine-wide reasoning in
  * `TextLayoutEngine.mapTextLayout`.
  *
- * - `'cap'` (default): capital letters centered. Best for UI text — button
- *   labels, headings, badges. Capitals and digits bracket the center
- *   symmetrically; descenders hang slightly below, matching CSS button
- *   behavior in browsers.
- * - `'x'`: lowercase x-height centered. Better for running body text;
+ * - `'optical'` (default): the midpoint of cap-height and x-height is
+ *   centered. Looks visually centered for mixed-case text — the
+ *   sweet spot between `'cap'` (which can read low for lowercase-heavy
+ *   strings) and `'x'` (which can read high for headings).
+ * - `'cap'`: capital letters centered. Use when content is mostly
+ *   uppercase or numeric (badges, timers). Mixed-case strings like
+ *   "Button" may read slightly low.
+ * - `'x'`: lowercase x-height centered. Best for running body text;
  *   capitals appear slightly high in headings.
  * - `'linebox'`: legacy. Centers the abstract asc-to-desc-plus-leading
  *   rectangle. Mathematically tidy but visually unbalanced because most
  *   Latin fonts have asymmetric asc/desc ratios.
  */
-export type TextBaselineMode = 'cap' | 'x' | 'linebox';
+export type TextBaselineMode = 'optical' | 'cap' | 'x' | 'linebox';
 /**
  * Structure mapping font family names to a set of font faces.
  */

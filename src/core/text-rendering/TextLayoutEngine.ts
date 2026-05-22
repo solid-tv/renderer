@@ -69,10 +69,10 @@ export const normalizeFontMetrics = (
 /**
  * Engine-wide per-line baseline anchor. Configured once at renderer creation
  * via {@link RendererMainSettings.textBaselineMode}, not exposed per node so
- * a single app can't mix anchor models across its text. Defaults to `'cap'`
- * — see {@link TextBaselineMode} for the rationale.
+ * a single app can't mix anchor models across its text. Defaults to
+ * `'optical'` — see {@link TextBaselineMode} for the rationale.
  */
-let baselineMode: TextBaselineMode = 'cap';
+let baselineMode: TextBaselineMode = 'optical';
 
 /**
  * Sets the engine-wide baseline anchor. Called by `Stage` during construction;
@@ -185,44 +185,51 @@ export const mapTextLayout = (
 
   // line[4] stores the alphabetic baseline Y of each line in screen px.
   //
-  // ── Per-line anchor: cap-height centering ─────────────────────────────
+  // ── Per-line anchor: optical centering (default) ─────────────────────
   //
-  //   baselineY(i) = lineHeight/2 + capHeight/2 + i × lineHeight
+  //   anchor    = (capHeight + xHeight) / 2
+  //   baselineY = lineHeight/2 + anchor/2 + i × lineHeight
   //
-  // The baseline sits below the line's geometric mid-line by exactly
-  // `capHeight / 2`, so the top of an uppercase letter lands the same
-  // distance *above* the mid-line — i.e. capital letters bracket the
-  // center symmetrically. Cap-height centering matches what designers
-  // expect for UI text (button labels, headings, badges): TXYZ and 1234
-  // sit centered; descenders like 'gjpq' hang slightly below, mirroring
-  // CSS button behavior in browsers.
+  // Pure cap-height centering reads slightly low for lowercase-heavy
+  // mixed-case strings like "Button" because the visual mass sits in
+  // the x-height band, below cap-center. Pure x-height centering goes
+  // the other way — caps appear high. Splitting the difference (mean of
+  // cap and x heights) lands at the optical center for the broadest mix
+  // of UI text. This is the same heuristic macOS/iOS controls use.
   //
   // Alternative anchors considered (kept here for the record):
   //
+  //   ── cap-height centering ────────────────────────────────────────────
+  //   baselineY = lineHeight/2 + capHeight/2 + i × lineHeight
+  //   Caps bracket the mid-line symmetrically. Right for all-caps or
+  //   numeric content (timers, badges); reads low for "Button".
+  //
   //   ── x-height centering ──────────────────────────────────────────────
-  //   baselineY(i) = lineHeight/2 + xHeight/2 + i × lineHeight
-  //   Centers lowercase letters on the mid-line. Matches CSS inline
-  //   `vertical-align: middle`. Reads well for running body text but
-  //   capitals appear high in headings/labels — wrong default for TV UI.
+  //   baselineY = lineHeight/2 + xHeight/2 + i × lineHeight
+  //   Centers lowercase. Matches CSS inline `vertical-align: middle`.
+  //   Reads well for body text; capitals appear high in headings.
   //
   //   ── line-box centering (pre-cap-height behavior) ───────────────────
   //   const halfLeading = (lineHeightPx − bareLineHeight) / 2
-  //   baselineY(i) = halfLeading + ascender + i × lineHeight
-  //   Centers the abstract asc-to-desc-plus-leading rectangle. The visible
-  //   ink lands noticeably high because asc/(asc−desc) is asymmetric for
-  //   most Latin fonts (~4.2:1 for Ubuntu). Mathematically tidy, visually
-  //   wrong.
+  //   baselineY = halfLeading + ascender + i × lineHeight
+  //   Centers the abstract asc-to-desc-plus-leading rectangle. Ink lands
+  //   noticeably high because asc/(asc−desc) is asymmetric for most
+  //   Latin fonts (~4.2:1 for Ubuntu). Mathematically tidy, visually wrong.
   //
   // The active anchor is configured at renderer creation via
-  // `RendererMainSettings.textBaselineMode`. Defaults to `'cap'`.
+  // `RendererMainSettings.textBaselineMode`. Defaults to `'optical'`.
   let firstBaselineY: number;
-  if (baselineMode === 'x') {
+  if (baselineMode === 'cap') {
+    firstBaselineY = (lineHeightPx + metrics.capHeight) * 0.5;
+  } else if (baselineMode === 'x') {
     firstBaselineY = (lineHeightPx + metrics.xHeight) * 0.5;
   } else if (baselineMode === 'linebox') {
     const halfLeading = (lineHeightPx - bareLineHeight) * 0.5;
     firstBaselineY = halfLeading + metrics.ascender;
   } else {
-    firstBaselineY = (lineHeightPx + metrics.capHeight) * 0.5;
+    // 'optical' — mean of cap-height and x-height
+    const opticalAnchor = (metrics.capHeight + metrics.xHeight) * 0.5;
+    firstBaselineY = (lineHeightPx + opticalAnchor) * 0.5;
   }
   for (let i = 0; i < effectiveLineAmount; i++) {
     const line = lines[i] as TextLineStruct;
