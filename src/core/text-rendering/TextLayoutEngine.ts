@@ -2,6 +2,7 @@ import type {
   FontMetrics,
   MeasureTextFn,
   NormalizedFontMetrics,
+  TextBaselineMode,
   TextLayoutStruct,
   TextLineStruct,
   WrappedLinesStruct,
@@ -35,16 +36,51 @@ type WrapStrategyFn = (
   overflowWidth: number,
 ) => [string, number, string];
 
+/**
+ * Generic Latin-font ratios used when exact metric values aren't available.
+ * Within a few percent of OS/2 sCapHeight / sxHeight across the common Latin
+ * families (Ubuntu, Noto, Roboto, Arial, etc.).
+ */
+const CAP_HEIGHT_FALLBACK_RATIO = 0.7;
+const X_HEIGHT_FALLBACK_RATIO = 0.5;
+
 export const normalizeFontMetrics = (
   metrics: FontMetrics,
   fontSize: number,
 ): NormalizedFontMetrics => {
   const scale = fontSize / metrics.unitsPerEm;
+  const capHeightUnits =
+    metrics.capHeight !== undefined
+      ? metrics.capHeight
+      : metrics.ascender * CAP_HEIGHT_FALLBACK_RATIO;
+  const xHeightUnits =
+    metrics.xHeight !== undefined
+      ? metrics.xHeight
+      : metrics.ascender * X_HEIGHT_FALLBACK_RATIO;
   return {
     ascender: metrics.ascender * scale,
     descender: metrics.descender * scale,
     lineGap: metrics.lineGap * scale,
+    capHeight: capHeightUnits * scale,
+    xHeight: xHeightUnits * scale,
   };
+};
+
+/**
+ * Engine-wide per-line baseline anchor. Configured once at renderer creation
+ * via {@link RendererMainSettings.textBaselineMode}, not exposed per node so
+ * a single app can't mix anchor models across its text. Defaults to `'cap'`
+ * — see {@link TextBaselineMode} for the rationale.
+ */
+let baselineMode: TextBaselineMode = 'cap';
+
+/**
+ * Sets the engine-wide baseline anchor. Called by `Stage` during construction;
+ * not intended to be called from user code (changing this mid-session would
+ * silently reflow every cached text layout).
+ */
+export const setBaselineMode = (mode: TextBaselineMode): void => {
+  baselineMode = mode;
 };
 
 export const mapTextLayout = (
@@ -61,18 +97,12 @@ export const mapTextLayout = (
   maxWidth: number,
   maxHeight: number,
 ): TextLayoutStruct => {
-  const ascPx = metrics.ascender;
-  const descPx = metrics.descender;
-  const lineGapPx = metrics.lineGap;
-
   // Default line height matches CSS 'normal': ascender + lineGap - descender.
-  // descPx is negative for descents below the baseline.
-  const bareLineHeight = ascPx - descPx + lineGapPx;
+  // metrics.descender is negative for descents below the baseline, so
+  // subtracting it adds the descent depth.
+  const bareLineHeight = metrics.ascender - metrics.descender + metrics.lineGap;
   const lineHeightPx =
     lineHeight <= 3 ? lineHeight * bareLineHeight : lineHeight;
-  // Half-leading: extra space split evenly above the ascent and below the descent.
-  // Negative when the user requests a line height smaller than the font's own extent.
-  const halfLeading = (lineHeightPx - bareLineHeight) * 0.5;
 
   let effectiveMaxLines = maxLines;
 
@@ -154,9 +184,46 @@ export const mapTextLayout = (
   const effectiveMaxHeight = effectiveLineAmount * lineHeightPx;
 
   // line[4] stores the alphabetic baseline Y of each line in screen px.
-  // The first baseline sits half-leading + ascender below the line box top,
-  // matching CSS line box layout.
-  const firstBaselineY = halfLeading + ascPx;
+  //
+  // ── Per-line anchor: cap-height centering ─────────────────────────────
+  //
+  //   baselineY(i) = lineHeight/2 + capHeight/2 + i × lineHeight
+  //
+  // The baseline sits below the line's geometric mid-line by exactly
+  // `capHeight / 2`, so the top of an uppercase letter lands the same
+  // distance *above* the mid-line — i.e. capital letters bracket the
+  // center symmetrically. Cap-height centering matches what designers
+  // expect for UI text (button labels, headings, badges): TXYZ and 1234
+  // sit centered; descenders like 'gjpq' hang slightly below, mirroring
+  // CSS button behavior in browsers.
+  //
+  // Alternative anchors considered (kept here for the record):
+  //
+  //   ── x-height centering ──────────────────────────────────────────────
+  //   baselineY(i) = lineHeight/2 + xHeight/2 + i × lineHeight
+  //   Centers lowercase letters on the mid-line. Matches CSS inline
+  //   `vertical-align: middle`. Reads well for running body text but
+  //   capitals appear high in headings/labels — wrong default for TV UI.
+  //
+  //   ── line-box centering (pre-cap-height behavior) ───────────────────
+  //   const halfLeading = (lineHeightPx − bareLineHeight) / 2
+  //   baselineY(i) = halfLeading + ascender + i × lineHeight
+  //   Centers the abstract asc-to-desc-plus-leading rectangle. The visible
+  //   ink lands noticeably high because asc/(asc−desc) is asymmetric for
+  //   most Latin fonts (~4.2:1 for Ubuntu). Mathematically tidy, visually
+  //   wrong.
+  //
+  // The active anchor is configured at renderer creation via
+  // `RendererMainSettings.textBaselineMode`. Defaults to `'cap'`.
+  let firstBaselineY: number;
+  if (baselineMode === 'x') {
+    firstBaselineY = (lineHeightPx + metrics.xHeight) * 0.5;
+  } else if (baselineMode === 'linebox') {
+    const halfLeading = (lineHeightPx - bareLineHeight) * 0.5;
+    firstBaselineY = halfLeading + metrics.ascender;
+  } else {
+    firstBaselineY = (lineHeightPx + metrics.capHeight) * 0.5;
+  }
   for (let i = 0; i < effectiveLineAmount; i++) {
     const line = lines[i] as TextLineStruct;
     line[4] = firstBaselineY + lineHeightPx * i;
