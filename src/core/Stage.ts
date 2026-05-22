@@ -21,6 +21,7 @@ import {
   type TextRenderers,
   type TrProps,
 } from './text-rendering/TextRenderer.js';
+import { setBaselineMode } from './text-rendering/TextLayoutEngine.js';
 
 import { EventEmitter } from '../common/EventEmitter.js';
 import { ContextSpy } from './lib/ContextSpy.js';
@@ -174,6 +175,12 @@ export class Stage {
       platform !== null,
       'A CorePlatform is not provided in the options',
     );
+
+    // Configure the engine-wide text baseline anchor before any node is
+    // created. TextLayoutEngine reads this value when laying out every line;
+    // setting it during Stage construction ensures it's stable for the
+    // lifetime of the renderer.
+    setBaselineMode(options.textBaselineMode);
 
     this.platform = platform;
 

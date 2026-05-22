@@ -2,6 +2,7 @@ import type {
   FontMetrics,
   MeasureTextFn,
   NormalizedFontMetrics,
+  TextBaselineMode,
   TextLayoutStruct,
   TextLineStruct,
   WrappedLinesStruct,
@@ -36,32 +37,50 @@ type WrapStrategyFn = (
 ) => [string, number, string];
 
 /**
- * Generic Latin-font cap-height ratio used when an exact value isn't available.
- * Within a few percent of OS/2 sCapHeight across the common Latin families
- * (Ubuntu, Noto, Roboto, Arial, etc.) and produces visually consistent
- * centering on the fallback path.
+ * Generic Latin-font ratios used when exact metric values aren't available.
+ * Within a few percent of OS/2 sCapHeight / sxHeight across the common Latin
+ * families (Ubuntu, Noto, Roboto, Arial, etc.).
  */
 const CAP_HEIGHT_FALLBACK_RATIO = 0.7;
+const X_HEIGHT_FALLBACK_RATIO = 0.5;
 
 export const normalizeFontMetrics = (
   metrics: FontMetrics,
   fontSize: number,
 ): NormalizedFontMetrics => {
   const scale = fontSize / metrics.unitsPerEm;
-  // Use the supplied cap height when present (SDF derives it from the H
-  // glyph; consumers may pass it explicitly in lightningMetrics). Otherwise
-  // fall back to the generic Latin ratio so the centering math has a
-  // sensible value for every font.
   const capHeightUnits =
     metrics.capHeight !== undefined
       ? metrics.capHeight
       : metrics.ascender * CAP_HEIGHT_FALLBACK_RATIO;
+  const xHeightUnits =
+    metrics.xHeight !== undefined
+      ? metrics.xHeight
+      : metrics.ascender * X_HEIGHT_FALLBACK_RATIO;
   return {
     ascender: metrics.ascender * scale,
     descender: metrics.descender * scale,
     lineGap: metrics.lineGap * scale,
     capHeight: capHeightUnits * scale,
+    xHeight: xHeightUnits * scale,
   };
+};
+
+/**
+ * Engine-wide per-line baseline anchor. Configured once at renderer creation
+ * via {@link RendererMainSettings.textBaselineMode}, not exposed per node so
+ * a single app can't mix anchor models across its text. Defaults to `'cap'`
+ * — see {@link TextBaselineMode} for the rationale.
+ */
+let baselineMode: TextBaselineMode = 'cap';
+
+/**
+ * Sets the engine-wide baseline anchor. Called by `Stage` during construction;
+ * not intended to be called from user code (changing this mid-session would
+ * silently reflow every cached text layout).
+ */
+export const setBaselineMode = (mode: TextBaselineMode): void => {
+  baselineMode = mode;
 };
 
 export const mapTextLayout = (
@@ -193,7 +212,18 @@ export const mapTextLayout = (
   //   ink lands noticeably high because asc/(asc−desc) is asymmetric for
   //   most Latin fonts (~4.2:1 for Ubuntu). Mathematically tidy, visually
   //   wrong.
-  const firstBaselineY = (lineHeightPx + metrics.capHeight) * 0.5;
+  //
+  // The active anchor is configured at renderer creation via
+  // `RendererMainSettings.textBaselineMode`. Defaults to `'cap'`.
+  let firstBaselineY: number;
+  if (baselineMode === 'x') {
+    firstBaselineY = (lineHeightPx + metrics.xHeight) * 0.5;
+  } else if (baselineMode === 'linebox') {
+    const halfLeading = (lineHeightPx - bareLineHeight) * 0.5;
+    firstBaselineY = halfLeading + metrics.ascender;
+  } else {
+    firstBaselineY = (lineHeightPx + metrics.capHeight) * 0.5;
+  }
   for (let i = 0; i < effectiveLineAmount; i++) {
     const line = lines[i] as TextLineStruct;
     line[4] = firstBaselineY + lineHeightPx * i;

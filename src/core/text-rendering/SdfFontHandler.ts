@@ -252,6 +252,20 @@ const processFontData = (
     // normalizeFontMetrics.
   }
 
+  // Same derivation for x-height using glyph 'x' (id 120). Only consumed
+  // when `RendererMainSettings.textBaselineMode === 'x'`; otherwise the
+  // 0.5 × ascender fallback inside `normalizeFontMetrics` is sufficient.
+  if (metrics.xHeight === undefined) {
+    const xGlyph = glyphMap.get(120); // 'x'
+    if (xGlyph !== undefined) {
+      const xHeightAtlasPx = fontData.common.base - xGlyph.yoffset;
+      metrics = {
+        ...metrics,
+        xHeight: (xHeightAtlasPx / fontData.info.size) * metrics.unitsPerEm,
+      };
+    }
+  }
+
   // Cache processed data
   fontCache.set(fontFamily, {
     data: fontData,

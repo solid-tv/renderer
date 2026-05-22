@@ -6,7 +6,10 @@ import { CoreNode, type CoreNodeProps } from '../core/CoreNode.js';
 import { type CoreTextNodeProps } from '../core/CoreTextNode.js';
 import type { INode, INodeProps, ITextNode, ITextNodeProps } from './INode.js';
 import type { TextureMemoryManagerSettings } from '../core/TextureMemoryManager.js';
-import type { TextRenderer } from '../core/text-rendering/TextRenderer.js';
+import type {
+  TextBaselineMode,
+  TextRenderer,
+} from '../core/text-rendering/TextRenderer.js';
 import type { CanvasRenderer } from '../core/renderers/canvas/CanvasRenderer.js';
 import type { WebGlRenderer } from '../core/renderers/webgl/WebGlRenderer.js';
 import type { Inspector, InspectorOptions } from './Inspector.js';
@@ -364,6 +367,28 @@ export type RendererMainSettings = RendererRuntimeSettings & {
   fontEngines: TextRenderer[];
 
   /**
+   * Per-line vertical baseline anchor used by the text layout engine.
+   *
+   * @remarks
+   * Picks which font-derived height is centered on each line's geometric
+   * mid-line. This is engine-wide and intentionally not exposed per node —
+   * mixing anchor models within one app produces visually inconsistent text.
+   *
+   * - `'cap'` (default): capital letters and digits sit centered on the line.
+   *   Best fit for UI text (button labels, headings, badges); descenders on
+   *   words like 'gjpq' hang slightly below center, matching CSS button
+   *   behavior in browsers.
+   * - `'x'`: lowercase x-height is centered. Better for running body text;
+   *   capitals appear slightly high in headings.
+   * - `'linebox'`: legacy mode. Centers the asc/lineGap/desc rectangle.
+   *   Mathematically tidy but visually unbalanced because most Latin fonts
+   *   have asymmetric asc/desc ratios.
+   *
+   * @defaultValue `'cap'`
+   */
+  textBaselineMode: TextBaselineMode;
+
+  /**
    * Force WebGL2
    *
    * @remarks
@@ -530,6 +555,7 @@ export class RendererMain extends EventEmitter {
       renderEngine: settings.renderEngine,
       quadBufferSize: settings.quadBufferSize ?? 4 * 1024 * 1024,
       fontEngines: settings.fontEngines ?? [],
+      textBaselineMode: settings.textBaselineMode ?? 'cap',
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
       createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
@@ -588,6 +614,7 @@ export class RendererMain extends EventEmitter {
       eventBus: this,
       quadBufferSize: settings.quadBufferSize!,
       fontEngines: settings.fontEngines!,
+      textBaselineMode: settings.textBaselineMode!,
       inspector: settings.inspector !== null,
       targetFPS: settings.targetFPS!,
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit!,
