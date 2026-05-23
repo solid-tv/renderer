@@ -52,7 +52,6 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
     return {
       width: 0,
       height: 0,
-      trimmedHeight: 0,
     };
   }
 
@@ -64,7 +63,6 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
       hasRemainingText: false,
       width: layout.width,
       height: layout.height,
-      trimmedHeight: layout.trimmedHeight,
       layout,
     };
   }
@@ -76,7 +74,6 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
     return {
       width: 0,
       height: 0,
-      trimmedHeight: 0,
     };
   }
 
@@ -90,7 +87,6 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
     hasRemainingText: false,
     width: layout.width,
     height: layout.height,
-    trimmedHeight: layout.trimmedHeight,
     layout,
   };
 };
@@ -349,21 +345,12 @@ const generateTextLayout = (
     }
   }
 
-  // Cap-top of first line to descender bottom of last line.
-  // descender is negative in NormalizedFontMetrics, so subtracting it
-  // adds the descender depth. Zero when there are no rendered lines.
-  const trimmedHeight =
-    lineAmount > 0
-      ? metrics.capHeight - metrics.descender + (lineAmount - 1) * lineHeightPx
-      : 0;
-
   // Convert final dimensions to pixel space for the layout
   return {
     glyphs,
     distanceRange: fontScale * fontData.distanceField.distanceRange,
     width: effectiveWidth * fontScale,
     height: effectiveHeight,
-    trimmedHeight,
     fontScale: fontScale,
     lineHeight: lineHeightPx,
     fontFamily,
