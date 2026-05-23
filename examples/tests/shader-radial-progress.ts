@@ -6,8 +6,9 @@ export async function automation(settings: ExampleSettings) {
 }
 
 export default async function test({ renderer, testRoot }: ExampleSettings) {
-  // 1. Fill-up animation: progress 0 → 1, looping. Cyan ring on a dim track.
-  const fillRing = renderer.createNode({
+  // 1. Self-animating fill: shader drives progress 0 → 1 from u_time, looping.
+  //    No JS-side animation needed — pure GLSL/Canvas math each frame.
+  renderer.createNode({
     x: 40,
     y: 40,
     w: 300,
@@ -15,23 +16,17 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     color: 0x00000000,
     shader: renderer.createShader('RadialProgress', {
       width: 16,
-      progress: 0,
+      duration: 2000,
+      countdown: 0, // fill 0 -> 1
       colors: [0x4aff80ff],
       trackColor: 0x1c3a2aff,
     }),
     parent: testRoot,
   });
 
-  // fillRing
-  //   .animate(
-  //     { shaderProps: { progress: 1 } },
-  //     { duration: 2000, loop: true, easing: 'linear' },
-  //   )
-  //   .start();
-
-  // 2. Countdown animation: progress 1 → 0, looping. Matches the reference
-  //    screenshot recipe (blue arc, dim blue track).
-  const countdownRing = renderer.createNode({
+  // 2. Self-animating countdown: shader drives progress 1 → 0, looping.
+  //    Matches the reference screenshot recipe (blue arc, dim blue track).
+  renderer.createNode({
     x: 380,
     y: 40,
     w: 300,
@@ -39,19 +34,13 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     color: 0x00000000,
     shader: renderer.createShader('RadialProgress', {
       width: 14,
-      progress: 1,
+      duration: 2000,
+      countdown: 1, // drain 1 -> 0
       colors: [0x4aa3ffff],
       trackColor: 0x1f3a5cff,
     }),
     parent: testRoot,
   });
-
-  // countdownRing
-  //   .animate(
-  //     { shaderProps: { progress: 0 } },
-  //     { duration: 2000, loop: true, easing: 'linear' },
-  //   )
-  //   .start();
 
   // 3. Multi-stop gradient swept along the arc, 50% progress
   renderer.createNode({
