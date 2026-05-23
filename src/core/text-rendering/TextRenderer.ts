@@ -14,6 +14,27 @@ export type TextBaseline =
   | 'bottom';
 export type TextVerticalAlign = 'top' | 'middle' | 'bottom';
 export type TextRenderers = 'canvas' | 'sdf';
+
+/**
+ * Selects which font-derived height the text layout engine centers on each
+ * line's geometric mid-line. Configured via {@link RendererMainSettings} and
+ * cannot be overridden per node — see the engine-wide reasoning in
+ * `TextLayoutEngine.mapTextLayout`.
+ *
+ * - `'optical'` (default): the midpoint of cap-height and x-height is
+ *   centered. Looks visually centered for mixed-case text — the
+ *   sweet spot between `'cap'` (which can read low for lowercase-heavy
+ *   strings) and `'x'` (which can read high for headings).
+ * - `'cap'`: capital letters centered. Use when content is mostly
+ *   uppercase or numeric (badges, timers). Mixed-case strings like
+ *   "Button" may read slightly low.
+ * - `'x'`: lowercase x-height centered. Best for running body text;
+ *   capitals appear slightly high in headings.
+ * - `'linebox'`: legacy. Centers the abstract asc-to-desc-plus-leading
+ *   rectangle. Mathematically tidy but visually unbalanced because most
+ *   Latin fonts have asymmetric asc/desc ratios.
+ */
+export type TextBaselineMode = 'optical' | 'cap' | 'x' | 'linebox';
 /**
  * Structure mapping font family names to a set of font faces.
  */
@@ -41,24 +62,54 @@ export interface FontMetrics {
    * The number of font units per 1 EM.
    */
   unitsPerEm: number;
+  /**
+   * The distance, in font units, from the baseline to the top of an uppercase
+   * letter (OS/2 sCapHeight).
+   *
+   * Used by the layout engine to vertically center capital letters on each
+   * line's geometric mid-line. When absent, the SDF backend derives this
+   * value from glyph `H` (id 72) in the BMFont atlas; the Canvas backend
+   * falls back to `0.7 × ascender` (a generic Latin-font approximation).
+   */
+  capHeight?: number;
+  /**
+   * The distance, in font units, from the baseline to the top of a lowercase
+   * letter (OS/2 sxHeight). Optional; used only when the baseline-anchor
+   * mode is set to x-height centering (experimental).
+   */
+  xHeight?: number;
 }
 
 /**
- * Normalized font metrics where values are expressed as a fraction of 1 EM.
+ * Normalized font metrics where values are expressed in pixels at the
+ * configured font size (em-px).
  */
 export interface NormalizedFontMetrics {
   /**
-   * The distance, as a fraction of 1 EM, from the baseline to the highest point of the font.
+   * The distance, in em-px, from the baseline to the highest point of the font.
    */
   ascender: number;
   /**
-   * The distance, as a fraction of 1 EM, from the baseline to the lowest point of the font.
+   * The distance, in em-px, from the baseline to the lowest point of the font.
    */
   descender: number;
   /**
-   * The additional space used in the calculation of the default line height as a fraction of 1 EM
+   * The additional space used in the calculation of the default line height, in em-px.
    */
   lineGap: number;
+  /**
+   * The distance, in em-px, from the baseline to the top of an uppercase letter.
+   * Always populated; derived or approximated when {@link FontMetrics.capHeight}
+   * is not provided by the caller.
+   */
+  capHeight: number;
+  /**
+   * The distance, in em-px, from the baseline to the top of a lowercase letter.
+   * Always populated; derived from glyph `x` for SDF, falls back to
+   * `0.5 × ascender` otherwise. Only used by the experimental x-height
+   * baseline-anchor mode.
+   */
+  xHeight: number;
 }
 
 /**
@@ -183,13 +234,18 @@ export interface TrProps extends TrFontProps {
    */
   maxLines: number;
   /**
-   * Vertical Align for text when lineHeight > fontSize
+   * Vertical alignment of the text block within its containing box.
    *
    * @remarks
-   * This property sets the vertical align of the text.
-   * Not yet implemented in the SDF renderer.
+   * The containing box is `maxHeight` if set, otherwise the node's
+   * own `h` (which a flex parent or the user may have grown beyond
+   * the intrinsic text height). Activates whenever the box is taller
+   * than the intrinsic text height. Composes with `textBaselineMode`
+   * (per-line anchor). CSS line-box semantics — `'top'` leaves
+   * half-leading above the first line's cap-top; `'bottom'` leaves
+   * half-leading below the last line's descender.
    *
-   * @default middle
+   * @default top
    */
   verticalAlign: TextVerticalAlign;
   /**
@@ -264,6 +320,11 @@ export interface TextLayout {
    * Total text height
    */
   height: number;
+  /**
+   * Trimmed text height — cap-top of the first line to descender bottom
+   * of the last line. See `TextRenderInfo.trimmedHeight`.
+   */
+  trimmedHeight: number;
   /**
    * Font scale factor
    */
@@ -360,6 +421,21 @@ export interface TextRenderProps {
 export interface TextRenderInfo {
   width: number;
   height: number;
+  /**
+   * Height of the visible glyph extent — from the first line's cap-top to
+   * the last line's descender bottom. Excludes half-leading and the slack
+   * between the font's ascender and cap-top.
+   *
+   * @remarks
+   * Formula: `capHeight − descender + (lines − 1) × lineHeightPx`
+   * (descender is negative in font metrics, so subtracting it adds the
+   * descender depth). For empty text, this is 0.
+   *
+   * Use this when you want flex `alignItems: 'center'` (or any layout
+   * that aligns by node `h`) to optically center the visible glyphs.
+   * Set `node.h = node.trimmedHeight` after the `loaded` event.
+   */
+  trimmedHeight: number;
   hasRemainingText?: boolean;
   remainingLines?: number;
   imageData?: ImageData | null; // Image data for Canvas Text Renderer

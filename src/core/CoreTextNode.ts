@@ -65,6 +65,7 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
   private _renderInfo: TextRenderInfo = {
     width: 0,
     height: 0,
+    trimmedHeight: 0,
   };
 
   private _type: 'sdf' | 'canvas' = 'sdf'; // Default to SDF renderer
@@ -144,13 +145,19 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
         }
         mountTranslateX = mountX * maxWidth;
       }
-      if (contain & TextConstraint.height && maxHeight > 0) {
-        if (verticalAlign === 'bottom') {
-          containY = maxHeight - h;
-        } else if (verticalAlign === 'middle') {
-          containY = (maxHeight - h) * 0.5;
-        }
+      if (contain & TextConstraint.height && hasMaxHeight === true) {
         mountTranslateY = mountY * maxHeight;
+      }
+    }
+
+    const intrinsicH = this._renderInfo.height;
+    const boxH = hasMaxHeight === true ? maxHeight : h;
+    const slackY = boxH - intrinsicH;
+    if (slackY > 0) {
+      if (verticalAlign === 'bottom') {
+        containY = slackY;
+      } else if (verticalAlign === 'middle') {
+        containY = slackY * 0.5;
       }
     }
 
@@ -283,6 +290,7 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
         w: this._renderInfo.width,
         h: this._renderInfo.height,
       },
+      trimmedHeight: this._renderInfo.trimmedHeight,
     } satisfies NodeTextLoadedPayload);
   };
 
@@ -586,5 +594,25 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
 
   get renderInfo(): TextRenderInfo {
     return this._renderInfo;
+  }
+
+  /**
+   * Visible glyph extent — from the first line's cap-top to the last
+   * line's descender bottom. Excludes half-leading and the slack above
+   * the cap-top inside the font's ascender.
+   *
+   * @remarks
+   * Useful with flex `alignItems: 'center'` (or any layout that aligns
+   * by node `h`) to optically center the glyphs rather than the
+   * lineHeightPx line-box. Listen for `loaded` and apply with:
+   *
+   * ```ts
+   * text.once('loaded', (n, p) => { text.h = p.trimmedHeight; });
+   * ```
+   *
+   * Zero before the text loads or for empty strings.
+   */
+  get trimmedHeight(): number {
+    return this._renderInfo.trimmedHeight;
   }
 }

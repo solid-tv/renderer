@@ -229,6 +229,44 @@ const processFontData = (
       unitsPerEm: 1000,
     };
 
+  // Derive cap-height from the atlas when the metrics block doesn't already
+  // supply it. The layout engine uses this value to vertically center
+  // capital letters on each line. BMFont stores per-glyph `yoffset` as the
+  // distance from the line-box top to the glyph's top, and `common.base` as
+  // the distance from the line-box top to the alphabetic baseline — so the
+  // distance from the baseline up to the top of 'H' (atlas design px) is
+  // `common.base - H.yoffset`. Converted into font units it slots into
+  // `FontMetrics.capHeight` alongside the existing ascender / descender
+  // values and flows through `normalizeFontMetrics`.
+  if (metrics.capHeight === undefined) {
+    const capGlyph = glyphMap.get(72); // 'H'
+    if (capGlyph !== undefined) {
+      const capHeightAtlasPx = fontData.common.base - capGlyph.yoffset;
+      metrics = {
+        ...metrics,
+        capHeight: (capHeightAtlasPx / fontData.info.size) * metrics.unitsPerEm,
+      };
+    }
+    // If 'H' isn't in the atlas (icon-only fonts, etc.) we leave capHeight
+    // undefined and rely on the 0.7 × ascender fallback inside
+    // normalizeFontMetrics.
+  }
+
+  // Same derivation for x-height using glyph 'x' (id 120). Consumed by
+  // both `textBaselineMode === 'x'` and `'optical'` (which uses the mean
+  // of cap-height and x-height); the 0.5 × ascender fallback inside
+  // `normalizeFontMetrics` covers fonts that ship without an 'x' glyph.
+  if (metrics.xHeight === undefined) {
+    const xGlyph = glyphMap.get(120); // 'x'
+    if (xGlyph !== undefined) {
+      const xHeightAtlasPx = fontData.common.base - xGlyph.yoffset;
+      metrics = {
+        ...metrics,
+        xHeight: (xHeightAtlasPx / fontData.info.size) * metrics.unitsPerEm,
+      };
+    }
+  }
+
   // Cache processed data
   fontCache.set(fontFamily, {
     data: fontData,
