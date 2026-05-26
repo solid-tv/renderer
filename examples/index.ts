@@ -102,7 +102,11 @@ const defaultPhysicalPixelRatio = 1;
     return;
   }
   assertTruthy(automation);
-  await runAutomation(renderMode, test, logFps);
+  // Optional shard string in the form "i/N" — when present, this page only
+  // runs the subset of tests where `index % N === i`. Used by the VRT runner
+  // to parallelize across multiple browser pages.
+  const shardParam = urlParams.get('shard');
+  await runAutomation(renderMode, test, logFps, shardParam);
 })().catch((err) => {
   console.error(err);
 });
@@ -348,7 +352,17 @@ async function runAutomation(
   renderMode: string,
   filter: string | null,
   logFps: boolean,
+  shard: string | null,
 ) {
+  let shardIndex = 0;
+  let shardTotal = 1;
+  if (shard) {
+    const match = /^(\d+)\/(\d+)$/.exec(shard);
+    if (match) {
+      shardIndex = Number(match[1]);
+      shardTotal = Number(match[2]);
+    }
+  }
   const logicalPixelRatio = defaultResolution / appHeight;
   const { renderer, appElement } = await initRenderer(
     renderMode,
@@ -359,14 +373,17 @@ async function runAutomation(
     false, // enableInspector
   );
 
-  // Iterate through all test modules
-  for (const testPath in testModules) {
+  // Iterate through all test modules. Sort so sharding is deterministic
+  // across pages, and apply the filter up front so the shard step indexes
+  // only the tests that will actually run.
+  const orderedPaths = Object.keys(testModules)
+    .sort()
+    .filter((p) => !filter || wildcardMatch(getTestName(p), filter));
+  for (let i = 0; i < orderedPaths.length; i++) {
+    if (i % shardTotal !== shardIndex) continue;
+    const testPath = orderedPaths[i]!;
     const testModule = testModules[testPath];
     const testName = getTestName(testPath);
-    // Skip tests that don't match the filter (if provided)
-    if (filter && !wildcardMatch(testName, filter)) {
-      continue;
-    }
     assertTruthy(testModule);
 
     // Setup Math.random to use a seeded random number generator for consistent
