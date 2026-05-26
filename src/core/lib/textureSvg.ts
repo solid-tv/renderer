@@ -54,9 +54,16 @@ export const loadSvg = async (
     img.src = url;
   });
 
-  const targetW = width || img.naturalWidth || img.width;
-  const targetH = height || img.naturalHeight || img.height;
-  const ratio = pixelRatio > 0 ? pixelRatio : 1;
+  // Target size precedence: explicit w/h on the texture, then the source
+  // crop dims (so a node that only sets srcWidth/srcHeight gets a texture
+  // sized to the crop, matching pre-fix behavior), then the SVG's intrinsic
+  // dimensions.
+  const targetW = width || sw || img.naturalWidth || img.width;
+  const targetH = height || sh || img.naturalHeight || img.height;
+  // Clamp the DPR multiplier so a sub-1 stage pixelRatio (e.g. an app
+  // rendering at 720p inside a 1080p design grid) doesn't downscale the
+  // raster below the requested size. HiDPI upscaling still applies.
+  const ratio = pixelRatio > 1 ? pixelRatio : 1;
   const physW = Math.max(1, Math.ceil(targetW * ratio));
   const physH = Math.max(1, Math.ceil(targetH * ratio));
 
