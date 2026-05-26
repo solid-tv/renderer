@@ -314,7 +314,7 @@ export class ImageTexture extends Texture {
       return this.loadImage(absoluteSrc);
     }
 
-    if (type === 'svg') {
+    if (type === 'svg' || isSvgImage(src) === true) {
       return loadSvg(
         absoluteSrc,
         this.props.w,
@@ -323,18 +323,7 @@ export class ImageTexture extends Texture {
         this.props.sy,
         this.props.sw,
         this.props.sh,
-      );
-    }
-
-    if (isSvgImage(src) === true) {
-      return loadSvg(
-        absoluteSrc,
-        this.props.w,
-        this.props.h,
-        this.props.sx,
-        this.props.sy,
-        this.props.sw,
-        this.props.sh,
+        this.txManager.pixelRatio,
       );
     }
 

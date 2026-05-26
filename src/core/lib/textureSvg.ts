@@ -1,5 +1,6 @@
 import { assertTruthy } from '../../utils.js';
 import { type TextureData } from '../textures/Texture.js';
+import { isBase64Image } from './utils.js';
 
 /**
  * Tests if the given location is a SVG
@@ -14,11 +15,21 @@ export function isSvgImage(url: string): boolean {
 }
 
 /**
- * Loads a SVG image
- * @param url
- * @returns
+ * Loads a SVG image and rasterizes it for use as a texture.
+ *
+ * @remarks
+ * Rasterizes at `pixelRatio` to keep the texture sharp on HiDPI / 4K displays.
+ * `width`/`height` are interpreted as the logical (CSS-pixel) target size; the
+ * backing canvas is allocated at `width * pixelRatio` × `height * pixelRatio`.
+ *
+ * When `sw`/`sh` are provided they describe a source-region crop on the SVG
+ * (not a crop of the destination canvas) and are sampled via the 9-arg form of
+ * drawImage.
+ *
+ * Returns an `ImageBitmap` when available (zero CPU readback, transferable),
+ * falling back to `ImageData` on older browsers without `createImageBitmap`.
  */
-export const loadSvg = (
+export const loadSvg = async (
   url: string,
   width: number | null,
   height: number | null,
@@ -26,34 +37,55 @@ export const loadSvg = (
   sy: number | null,
   sw: number | null,
   sh: number | null,
+  pixelRatio: number,
 ): Promise<TextureData> => {
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    assertTruthy(ctx);
+  const img = new Image();
+  if (isBase64Image(url) === false) {
+    img.crossOrigin = 'anonymous';
+  }
 
-    ctx.imageSmoothingEnabled = true;
-    const img = new Image();
-    img.onload = () => {
-      const x = sx ?? 0;
-      const y = sy ?? 0;
-      const w = width || img.width;
-      const h = height || img.height;
-
-      canvas.width = w;
-      canvas.height = h;
-      ctx.drawImage(img, 0, 0, w, h);
-
-      resolve({
-        data: ctx.getImageData(x, y, sw ?? w, sh ?? h),
-        premultiplyAlpha: false,
-      });
-    };
-
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
     img.onerror = (err) => {
-      reject(err);
+      reject(
+        err instanceof Error ? err : new Error(`SVG loading failed: ${url}`),
+      );
     };
-
     img.src = url;
   });
+
+  const targetW = width || img.naturalWidth || img.width;
+  const targetH = height || img.naturalHeight || img.height;
+  const ratio = pixelRatio > 0 ? pixelRatio : 1;
+  const physW = Math.max(1, Math.ceil(targetW * ratio));
+  const physH = Math.max(1, Math.ceil(targetH * ratio));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = physW;
+  canvas.height = physH;
+  const ctx = canvas.getContext('2d');
+  assertTruthy(ctx);
+
+  if (sw !== null && sh !== null) {
+    ctx.drawImage(img, sx ?? 0, sy ?? 0, sw, sh, 0, 0, physW, physH);
+  } else {
+    ctx.drawImage(img, 0, 0, physW, physH);
+  }
+
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(canvas);
+      return {
+        data: bitmap,
+        premultiplyAlpha: false,
+      };
+    } catch {
+      // fall through to ImageData
+    }
+  }
+
+  return {
+    data: ctx.getImageData(0, 0, physW, physH),
+    premultiplyAlpha: false,
+  };
 };

@@ -245,6 +245,10 @@ export class CoreTextureManager extends EventEmitter {
 
   public platform: Platform;
 
+  get pixelRatio(): number {
+    return this.stage.pixelRatio;
+  }
+
   imageWorkerManager: ImageWorkerManager | null = null;
   hasCreateImageBitmap = false;
   imageBitmapSupported = {
