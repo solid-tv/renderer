@@ -93,6 +93,13 @@ const argv = yargs(hideBin(process.argv))
       default: '*',
       description: 'Tests to run ("*" wildcard pattern)',
     },
+    workers: {
+      type: 'number',
+      alias: 'w',
+      default: 1,
+      description:
+        'Number of parallel browser pages used to run tests (sharded round-robin)',
+    },
   })
   .parseSync();
 
@@ -129,6 +136,7 @@ async function dockerCiMode(): Promise<number> {
     argv.skipBuild ? '--skipBuild' : '',
     argv.port ? `--port ${argv.port}` : '',
     argv.filter ? `--filter "${argv.filter}"` : '',
+    argv.workers > 1 ? `--workers ${argv.workers}` : '',
   ].join(' ');
 
   // Get the directory of the current file
@@ -252,7 +260,9 @@ async function runTest(browserType: 'chromium') {
     await fs.emptyDir(failedResultsDir);
   }
 
-  // Launch browser and create page
+  // Launch the browser once; each worker runs in its own Page sharing the
+  // same browser process. Pages run in parallel, each handling a round-robin
+  // shard of the test list (see runAutomation in examples/index.ts).
   const browser = await browsers[browserType].launch({
     args: [
       '--disable-font-subpixel-positioning',
@@ -262,22 +272,14 @@ async function runTest(browserType: 'chromium') {
     ],
   });
 
-  const page = await browser.newPage();
+  const workerCount = Math.max(1, argv.workers);
 
-  // If verbose, log out console messages from the browser
-  if (argv.verbose) {
-    page.on('console', (msg) => console.log(`console: ${msg.text()}`));
-  }
-
-  /**
-   * Keeps track of the latest snapshot index for each test
-   */
-  const testCounters: Record<string, number> = {};
-
-  // Expose the `snapshot()` function to the browser
-  await page.exposeFunction(
-    'snapshot',
-    async (test: string, options: SnapshotOptions) => {
+  // Each test's first snapshot is index 1, second is index 2, etc. With
+  // sharding, a given test only runs in one worker, so per-worker counters
+  // are sufficient. Snapshot filenames are still globally unique.
+  const makeSnapshotHandler = (page: import('playwright').Page) => {
+    const testCounters: Record<string, number> = {};
+    return async (test: string, options: SnapshotOptions) => {
       snapshotsTested++;
 
       // Ensure clip dimensions are integers (matches Playwright's clip shape
@@ -345,101 +347,94 @@ async function runTest(browserType: 'chromium') {
           ),
         );
       }
-    },
-  );
+    };
+  };
 
-  /**
-   * Resolve function for the donePromise below
-   */
-  let resolveDonePromise: (exitCode: number) => void;
-  /**
-   * Promise that resolves when all tests are done
-   */
-  const donePromise = new Promise<number>((resolve) => {
-    resolveDonePromise = resolve;
-  });
+  const runWorker = async (shardIndex: number) => {
+    const page = await browser.newPage();
 
-  // Expose the `doneTests()` function to the browser
-  // which will close the browser, calculate/print results and resolve the donePromise
-  await page.exposeFunction('doneTests', async () => {
-    await browser.close();
-
-    // Summarize results
-
-    const passPerc: string = (
-      (snapshotsPassed / snapshotsTested) *
-      100
-    ).toFixed(1);
-    const failPerc: string = (
-      (snapshotsFailed / snapshotsTested) *
-      100
-    ).toFixed(1);
-    const skipPerc: string = (
-      (snapshotsSkipped / snapshotsTested) *
-      100
-    ).toFixed(1);
-
-    if (argv.capture) {
-      console.log(
-        chalk.white.underline(`\nVisual Regression Test Capture Completed:`),
+    if (argv.verbose) {
+      page.on('console', (msg) =>
+        console.log(`console[${shardIndex}]: ${msg.text()}`),
       );
-
-      if (snapshotsPassed > 0) {
-        console.log(
-          chalk.green(
-            `   ${snapshotsPassed} snapshots captured (${passPerc}%)`,
-          ),
-        );
-      }
-
-      if (snapshotsSkipped > 0) {
-        console.log(
-          chalk.yellow(
-            `   ${snapshotsSkipped} snapshots skipped (${skipPerc}%)`,
-          ),
-        );
-      }
-
-      console.log(chalk.gray(`   ${snapshotsTested} snapshots detected`));
-    } else {
-      console.log(
-        chalk.white.underline(`\nVisual Regression Tests Completed:`),
-      );
-
-      if (snapshotsFailed > 0) {
-        console.log(
-          chalk.red(`   ${snapshotsFailed} snapshots failed (${failPerc}%)`),
-        );
-        console.log(
-          chalk.gray(
-            `      (See \`${failedResultsDir}\` directory for failed results)`,
-          ),
-        );
-      }
-
-      if (snapshotsPassed > 0) {
-        console.log(
-          chalk.green(`   ${snapshotsPassed} snapshots passed (${passPerc}%)`),
-        );
-      }
-
-      console.log(chalk.gray(`   ${snapshotsTested} snapshots tested`));
     }
 
-    // Extra new line
-    console.log(chalk.reset(''));
+    await page.exposeFunction('snapshot', makeSnapshotHandler(page));
+
+    const donePromise = new Promise<void>((resolve) => {
+      void page.exposeFunction('doneTests', () => {
+        resolve();
+      });
+    });
+
+    const shardParam =
+      workerCount > 1 ? `&shard=${shardIndex}/${workerCount}` : '';
+    await page.goto(
+      `http://localhost:${argv.port}/?automation=true&test=${argv.filter}${shardParam}`,
+    );
+
+    await donePromise;
+    await page.close();
+  };
+
+  await Promise.all(
+    Array.from({ length: workerCount }, (_, i) => runWorker(i)),
+  );
+  await browser.close();
+
+  // Summarize results
+  const passPerc: string = ((snapshotsPassed / snapshotsTested) * 100).toFixed(
+    1,
+  );
+  const failPerc: string = ((snapshotsFailed / snapshotsTested) * 100).toFixed(
+    1,
+  );
+  const skipPerc: string = ((snapshotsSkipped / snapshotsTested) * 100).toFixed(
+    1,
+  );
+
+  if (argv.capture) {
+    console.log(
+      chalk.white.underline(`\nVisual Regression Test Capture Completed:`),
+    );
+
+    if (snapshotsPassed > 0) {
+      console.log(
+        chalk.green(`   ${snapshotsPassed} snapshots captured (${passPerc}%)`),
+      );
+    }
+
+    if (snapshotsSkipped > 0) {
+      console.log(
+        chalk.yellow(`   ${snapshotsSkipped} snapshots skipped (${skipPerc}%)`),
+      );
+    }
+
+    console.log(chalk.gray(`   ${snapshotsTested} snapshots detected`));
+  } else {
+    console.log(chalk.white.underline(`\nVisual Regression Tests Completed:`));
 
     if (snapshotsFailed > 0) {
-      resolveDonePromise(1);
-    } else {
-      resolveDonePromise(0);
+      console.log(
+        chalk.red(`   ${snapshotsFailed} snapshots failed (${failPerc}%)`),
+      );
+      console.log(
+        chalk.gray(
+          `      (See \`${failedResultsDir}\` directory for failed results)`,
+        ),
+      );
     }
-  });
 
-  // Go to the examples page
-  await page.goto(
-    `http://localhost:${argv.port}/?automation=true&test=${argv.filter}`,
-  );
+    if (snapshotsPassed > 0) {
+      console.log(
+        chalk.green(`   ${snapshotsPassed} snapshots passed (${passPerc}%)`),
+      );
+    }
 
-  return donePromise;
+    console.log(chalk.gray(`   ${snapshotsTested} snapshots tested`));
+  }
+
+  console.log(chalk.reset(''));
+
+  return snapshotsFailed > 0 ? 1 : 0;
 }
