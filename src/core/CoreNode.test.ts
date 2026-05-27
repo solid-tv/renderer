@@ -973,13 +973,9 @@ describe('set color()', () => {
   });
 
   describe('clipping property', () => {
-    it('defaults to false with zero margins', () => {
+    it('defaults to false', () => {
       const node = new CoreNode(stage, defaultProps());
       expect(node.clipping).toBe(false);
-      expect((node as any)._clipMarginT).toBe(0);
-      expect((node as any)._clipMarginR).toBe(0);
-      expect((node as any)._clipMarginB).toBe(0);
-      expect((node as any)._clipMarginL).toBe(0);
     });
 
     it('accepts boolean true via setter', () => {
@@ -987,52 +983,37 @@ describe('set color()', () => {
       node.clipping = true;
       expect(node.clipping).toBe(true);
       expect(node.props.clipping).toBe(true);
-      expect((node as any)._clipMarginT).toBe(0);
     });
 
-    it('accepts a [top, right, bottom, left] tuple and normalizes props.clipping to true', () => {
+    it('stores a [top, right, bottom, left] tuple as-is', () => {
       const node = new CoreNode(stage, defaultProps());
-      node.clipping = [10, 20, 30, 40];
-      expect(node.props.clipping).toBe(true);
-      expect((node as any)._clipMarginT).toBe(10);
-      expect((node as any)._clipMarginR).toBe(20);
-      expect((node as any)._clipMarginB).toBe(30);
-      expect((node as any)._clipMarginL).toBe(40);
-      expect(node.clipping).toEqual([10, 20, 30, 40]);
-    });
-
-    it('returns boolean from getter when all margins are zero', () => {
-      const node = new CoreNode(stage, defaultProps());
-      node.clipping = [0, 0, 0, 0];
-      expect(node.clipping).toBe(true);
+      const tuple: [number, number, number, number] = [10, 20, 30, 40];
+      node.clipping = tuple;
+      expect(node.props.clipping).toBe(tuple);
+      expect(node.clipping).toBe(tuple);
     });
 
     it('accepts negative margins (insets the clip rect)', () => {
       const node = new CoreNode(stage, defaultProps());
       node.clipping = [-5, -5, -5, -5];
       expect(node.clipping).toEqual([-5, -5, -5, -5]);
-      expect(node.props.clipping).toBe(true);
     });
 
     it('clears margins when reassigned to a plain boolean', () => {
       const node = new CoreNode(stage, defaultProps());
       node.clipping = [10, 20, 30, 40];
       node.clipping = true;
-      expect((node as any)._clipMarginT).toBe(0);
-      expect((node as any)._clipMarginL).toBe(0);
       expect(node.clipping).toBe(true);
-
       node.clipping = false;
       expect(node.clipping).toBe(false);
-      expect(node.props.clipping).toBe(false);
     });
 
-    it('short-circuits redundant writes of identical values', () => {
+    it('short-circuits redundant writes of the same reference', () => {
       const node = new CoreNode(stage, defaultProps());
-      node.clipping = [10, 20, 30, 40];
+      const tuple: [number, number, number, number] = [10, 20, 30, 40];
+      node.clipping = tuple;
       node.updateType = 0;
-      node.clipping = [10, 20, 30, 40];
-      // No update should have been scheduled since the value did not change.
+      node.clipping = tuple;
       expect(node.updateType).toBe(0);
     });
 
@@ -1042,15 +1023,6 @@ describe('set color()', () => {
       node.clipping = [10, 20, 30, 40];
       expect(node.updateType & UpdateType.Clipping).toBeTruthy();
       expect(node.updateType & UpdateType.RenderBounds).toBeTruthy();
-    });
-
-    it('accepts the array form via the constructor props', () => {
-      const node = new CoreNode(
-        stage,
-        defaultProps({ clipping: [5, 10, 15, 20] }),
-      );
-      expect(node.props.clipping).toBe(true);
-      expect(node.clipping).toEqual([5, 10, 15, 20]);
     });
 
     it('expands the clipping rect outward by the configured margins', () => {

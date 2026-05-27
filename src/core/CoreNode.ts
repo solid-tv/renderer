@@ -815,15 +815,6 @@ export class CoreNode extends EventEmitter {
     h: 0,
     valid: false,
   };
-  /**
-   * Per-side outward expansion (in pixels) of the clipping rectangle.
-   * Resolved from the `clipping` setter so the hot path reads four scalars
-   * instead of inspecting an array each frame. Negative values inset the rect.
-   */
-  private _clipMarginT = 0;
-  private _clipMarginR = 0;
-  private _clipMarginB = 0;
-  private _clipMarginL = 0;
   public textureCoords?: TextureCoords;
   public updateShaderUniforms: boolean = false;
   public isRenderable = false;
@@ -890,23 +881,14 @@ export class CoreNode extends EventEmitter {
     // creates a fresh object with a consistent shape.  Save fields that are
     // re-applied through setters, then null them on props so the setters
     // detect the change.
-    const {
-      texture,
-      shader,
-      src,
-      rtt,
-      boundsMargin,
-      clipping,
-      interactive,
-      parent,
-    } = props;
+    const { texture, shader, src, rtt, boundsMargin, interactive, parent } =
+      props;
     const p = (this.props = props);
     p.texture = null;
     p.shader = null;
     p.src = null;
     p.rtt = false;
     p.boundsMargin = null;
-    p.clipping = false;
     p.scale = null;
 
     //check if any color props are set for premultiplied color updates
@@ -956,9 +938,6 @@ export class CoreNode extends EventEmitter {
     }
     if (boundsMargin !== null) {
       this.boundsMargin = boundsMargin;
-    }
-    if (clipping !== false) {
-      this.clipping = clipping;
     }
     if (interactive !== undefined) {
       this.interactive = interactive;
@@ -1391,7 +1370,7 @@ export class CoreNode extends EventEmitter {
         childUpdateType |= UpdateType.Global;
       }
 
-      if (this.props.clipping === true) {
+      if (this.props.clipping !== false) {
         updateType |= UpdateType.Clipping | UpdateType.RenderBounds;
         childUpdateType |= UpdateType.RenderBounds;
       }
@@ -1694,18 +1673,29 @@ export class CoreNode extends EventEmitter {
     }
 
     // clipping is enabled and we are in bounds create our own bounds
-    const { x, y, w, h } = this.props;
+    const { x, y, w, h, clipping } = this.props;
 
     // Pick the global transform if available, otherwise use the local transform
     // global transform is only available if the node in an RTT chain
     const { tx, ty } = this.sceneGlobalTransform || this.globalTransform || {};
     const _x = tx ?? x;
     const _y = ty ?? y;
+
+    let mT = 0;
+    let mR = 0;
+    let mB = 0;
+    let mL = 0;
+    if (Array.isArray(clipping) === true) {
+      mT = clipping[0];
+      mR = clipping[1];
+      mB = clipping[2];
+      mL = clipping[3];
+    }
     this.strictBound = createBound(
-      _x - this._clipMarginL,
-      _y - this._clipMarginT,
-      _x + w + this._clipMarginR,
-      _y + h + this._clipMarginB,
+      _x - mL,
+      _y - mT,
+      _x + w + mR,
+      _y + h + mB,
       this.strictBound,
     );
 
@@ -1947,11 +1937,17 @@ export class CoreNode extends EventEmitter {
     const { clipping } = props;
     const isRotated = gt!.tb !== 0 || gt!.tc !== 0;
 
-    if (clipping === true && isRotated === false) {
-      const mT = this._clipMarginT;
-      const mR = this._clipMarginR;
-      const mB = this._clipMarginB;
-      const mL = this._clipMarginL;
+    if (clipping !== false && isRotated === false) {
+      let mT = 0;
+      let mR = 0;
+      let mB = 0;
+      let mL = 0;
+      if (Array.isArray(clipping) === true) {
+        mT = clipping[0];
+        mR = clipping[1];
+        mB = clipping[2];
+        mL = clipping[3];
+      }
       clippingRect.x = gt!.tx - mL;
       clippingRect.y = gt!.ty - mT;
       clippingRect.w = this.props.w * gt!.ta + mL + mR;
@@ -2457,53 +2453,14 @@ export class CoreNode extends EventEmitter {
   }
 
   get clipping(): boolean | [number, number, number, number] {
-    const t = this._clipMarginT;
-    const r = this._clipMarginR;
-    const b = this._clipMarginB;
-    const l = this._clipMarginL;
-    if (t === 0 && r === 0 && b === 0 && l === 0) {
-      return this.props.clipping as boolean;
-    }
-    return [t, r, b, l];
+    return this.props.clipping;
   }
 
   set clipping(value: boolean | [number, number, number, number]) {
-    // Hot-path: setter is typically called once at construction; the equality
-    // checks below short-circuit redundant writes (e.g. setting `false` on a
-    // never-clipped node, or re-applying the same margin tuple) so we avoid
-    // the cost of an unnecessary subtree traversal via setUpdateType.
-    let nextClipping: boolean;
-    let nextT = 0;
-    let nextR = 0;
-    let nextB = 0;
-    let nextL = 0;
-
-    if (value === true || value === false) {
-      nextClipping = value;
-    } else {
-      nextClipping = true;
-      nextT = value[0];
-      nextR = value[1];
-      nextB = value[2];
-      nextL = value[3];
-    }
-
-    if (
-      this.props.clipping === nextClipping &&
-      this._clipMarginT === nextT &&
-      this._clipMarginR === nextR &&
-      this._clipMarginB === nextB &&
-      this._clipMarginL === nextL
-    ) {
+    if (this.props.clipping === value) {
       return;
     }
-
-    this.props.clipping = nextClipping;
-    this._clipMarginT = nextT;
-    this._clipMarginR = nextR;
-    this._clipMarginB = nextB;
-    this._clipMarginL = nextL;
-
+    this.props.clipping = value;
     this.setUpdateType(
       UpdateType.Clipping | UpdateType.RenderBounds | UpdateType.Children,
     );
