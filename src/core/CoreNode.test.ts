@@ -971,4 +971,175 @@ describe('set color()', () => {
       expect(spyB).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('clipping property', () => {
+    it('defaults to false with zero margins', () => {
+      const node = new CoreNode(stage, defaultProps());
+      expect(node.clipping).toBe(false);
+      expect((node as any)._clipMarginT).toBe(0);
+      expect((node as any)._clipMarginR).toBe(0);
+      expect((node as any)._clipMarginB).toBe(0);
+      expect((node as any)._clipMarginL).toBe(0);
+    });
+
+    it('accepts boolean true via setter', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.clipping = true;
+      expect(node.clipping).toBe(true);
+      expect(node.props.clipping).toBe(true);
+      expect((node as any)._clipMarginT).toBe(0);
+    });
+
+    it('accepts a [top, right, bottom, left] tuple and normalizes props.clipping to true', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.clipping = [10, 20, 30, 40];
+      expect(node.props.clipping).toBe(true);
+      expect((node as any)._clipMarginT).toBe(10);
+      expect((node as any)._clipMarginR).toBe(20);
+      expect((node as any)._clipMarginB).toBe(30);
+      expect((node as any)._clipMarginL).toBe(40);
+      expect(node.clipping).toEqual([10, 20, 30, 40]);
+    });
+
+    it('returns boolean from getter when all margins are zero', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.clipping = [0, 0, 0, 0];
+      expect(node.clipping).toBe(true);
+    });
+
+    it('accepts negative margins (insets the clip rect)', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.clipping = [-5, -5, -5, -5];
+      expect(node.clipping).toEqual([-5, -5, -5, -5]);
+      expect(node.props.clipping).toBe(true);
+    });
+
+    it('clears margins when reassigned to a plain boolean', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.clipping = [10, 20, 30, 40];
+      node.clipping = true;
+      expect((node as any)._clipMarginT).toBe(0);
+      expect((node as any)._clipMarginL).toBe(0);
+      expect(node.clipping).toBe(true);
+
+      node.clipping = false;
+      expect(node.clipping).toBe(false);
+      expect(node.props.clipping).toBe(false);
+    });
+
+    it('short-circuits redundant writes of identical values', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.clipping = [10, 20, 30, 40];
+      node.updateType = 0;
+      node.clipping = [10, 20, 30, 40];
+      // No update should have been scheduled since the value did not change.
+      expect(node.updateType).toBe(0);
+    });
+
+    it('schedules clipping + render-bounds updates when value changes', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.updateType = 0;
+      node.clipping = [10, 20, 30, 40];
+      expect(node.updateType & UpdateType.Clipping).toBeTruthy();
+      expect(node.updateType & UpdateType.RenderBounds).toBeTruthy();
+    });
+
+    it('accepts the array form via the constructor props', () => {
+      const node = new CoreNode(
+        stage,
+        defaultProps({ clipping: [5, 10, 15, 20] }),
+      );
+      expect(node.props.clipping).toBe(true);
+      expect(node.clipping).toEqual([5, 10, 15, 20]);
+    });
+
+    it('expands the clipping rect outward by the configured margins', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.alpha = 1;
+      node.x = 100;
+      node.y = 100;
+      node.w = 50;
+      node.h = 50;
+      node.clipping = [10, 20, 30, 40];
+
+      node.update(0, { x: 0, y: 0, w: 1000, h: 1000, valid: true });
+
+      // Expected: x = 100 - 40 = 60, y = 100 - 10 = 90,
+      //           w = 50 + 40 + 20 = 110, h = 50 + 10 + 30 = 90
+      expect(node.clippingRect.valid).toBe(true);
+      expect(node.clippingRect.x).toBe(60);
+      expect(node.clippingRect.y).toBe(90);
+      expect(node.clippingRect.w).toBe(110);
+      expect(node.clippingRect.h).toBe(90);
+    });
+
+    it('produces the unmodified node rect when clipping = true with no margins', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.alpha = 1;
+      node.x = 25;
+      node.y = 35;
+      node.w = 50;
+      node.h = 60;
+      node.clipping = true;
+
+      node.update(0, { x: 0, y: 0, w: 1000, h: 1000, valid: true });
+
+      expect(node.clippingRect.x).toBe(25);
+      expect(node.clippingRect.y).toBe(35);
+      expect(node.clippingRect.w).toBe(50);
+      expect(node.clippingRect.h).toBe(60);
+    });
+
+    it('still intersects with parent clipping rect when margins push beyond it', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.alpha = 1;
+      node.x = 100;
+      node.y = 100;
+      node.w = 50;
+      node.h = 50;
+      // Margins try to extend the clip past the parent bounds:
+      node.clipping = [100, 100, 100, 100];
+
+      // Parent clip limits us to (0,0,200,200).
+      node.update(0, { x: 0, y: 0, w: 200, h: 200, valid: true });
+
+      expect(node.clippingRect.valid).toBe(true);
+      expect(node.clippingRect.x).toBe(0);
+      expect(node.clippingRect.y).toBe(0);
+      expect(node.clippingRect.w).toBe(200);
+      expect(node.clippingRect.h).toBe(200);
+    });
+
+    it('does not produce its own clip rect when the node is rotated, even with margins', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.alpha = 1;
+      node.x = 100;
+      node.y = 100;
+      node.w = 50;
+      node.h = 50;
+      node.clipping = [10, 10, 10, 10];
+      node.rotation = Math.PI / 4;
+
+      // No parent clip rect to inherit — rotated nodes must skip their own clip.
+      node.update(0, { x: 0, y: 0, w: 0, h: 0, valid: false });
+
+      expect(node.clippingRect.valid).toBe(false);
+    });
+  });
 });
