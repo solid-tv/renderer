@@ -8,24 +8,38 @@ import type { IEventEmitter } from './IEventEmitter.js';
  * EventEmitter base class
  */
 export class EventEmitter implements IEventEmitter {
-  private eventListeners: { [eventName: string]: any } = {};
+  /**
+   * Lazily allocated on first `on`/`once` call. The vast majority of nodes in
+   * a scene graph never have a listener attached, so deferring the map avoids
+   * one object allocation per instance and keeps the hidden class smaller.
+   * `null` means no listeners have ever been registered.
+   */
+  private eventListeners: { [eventName: string]: any } | null = null;
 
   on(event: string, listener: (target: any, data: any) => void): void {
-    let listeners = this.eventListeners[event];
-    if (!listeners) {
+    let map = this.eventListeners;
+    if (map === null) {
+      map = this.eventListeners = {};
+    }
+    let listeners = map[event];
+    if (listeners === undefined) {
       listeners = [];
+      map[event] = listeners;
     }
     listeners.push(listener);
-    this.eventListeners[event] = listeners;
   }
 
   off(event: string, listener?: (target: any, data: any) => void): void {
-    const listeners = this.eventListeners[event];
-    if (!listeners) {
+    const map = this.eventListeners;
+    if (map === null) {
       return;
     }
-    if (!listener) {
-      delete this.eventListeners[event];
+    const listeners = map[event];
+    if (listeners === undefined) {
+      return;
+    }
+    if (listener === undefined) {
+      map[event] = undefined;
       return;
     }
     const index = listeners.indexOf(listener);
@@ -43,8 +57,12 @@ export class EventEmitter implements IEventEmitter {
   }
 
   emit(event: string, data?: any): void {
-    const listeners = this.eventListeners[event];
-    if (!listeners) {
+    const map = this.eventListeners;
+    if (map === null) {
+      return;
+    }
+    const listeners = map[event];
+    if (listeners === undefined) {
       return;
     }
     [...listeners].forEach((listener) => {
@@ -53,6 +71,6 @@ export class EventEmitter implements IEventEmitter {
   }
 
   removeAllListeners() {
-    this.eventListeners = {};
+    this.eventListeners = null;
   }
 }
