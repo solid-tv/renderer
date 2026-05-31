@@ -72,13 +72,14 @@ const defaultProps = (
   ...overrides,
 });
 
-const makeStage = () =>
+const makeStage = (texture: Texture) =>
   mock<Stage>({
     strictBound: createBound(0, 0, 200, 200),
     preloadBound: createBound(0, 0, 200, 200),
     defaultTexture: { state: 'loaded' } as never,
     defShaderNode: null as never,
     renderer: mock<CoreRenderer>() as CoreRenderer,
+    txManager: { createTexture: vi.fn(() => texture) } as never,
   });
 
 const makeCanvasRenderer = (): TextRenderer => {
@@ -107,10 +108,9 @@ const makeLoadedTexture = () =>
 
 describe('CoreTextNode (canvas) clearing text', () => {
   it('clears the stale texture when text becomes empty', () => {
-    const stage = makeStage();
     const renderer = makeCanvasRenderer();
     const texture = makeLoadedTexture();
-    stage.txManager = { createTexture: vi.fn(() => texture) } as never;
+    const stage = makeStage(texture);
 
     const node = new CoreTextNode(
       stage,
