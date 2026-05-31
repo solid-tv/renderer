@@ -14,9 +14,9 @@ LightningJS relies on **WebGL 1.x** (based on OpenGL ES 2.0) or newer for its re
 
 On low-RAM devices (those with **less than ~1GB of physical RAM**) running **Chromium v123 or newer**, the browser may proactively free the GPU and **lose the WebGL context** when the app is backgrounded for more than ~5 seconds (see [Chromium change 5285836](https://chromium-review.googlesource.com/c/chromium/src/+/5285836)). This is common on Android TV and Fire TV. After a loss, the GPU resources (textures, programs, buffers) are gone and the underlying `gl.*` create calls return `null`.
 
-The renderer detects this via the canvas `webglcontextlost` / `webglcontextrestored` events. On loss it calls `event.preventDefault()` (required for the browser to ever restore the context), pauses the render loop, and emits a `contextLost` event. When the context comes back it resumes the loop and emits `contextRestored`.
+The renderer detects this via the canvas `webglcontextlost` event. On loss it stops the render loop (so it issues no GL calls against the dead context) and emits a `contextLost` event.
 
-The renderer does **not** automatically rebuild GPU resources on restore. The recommended handling is to reload the app on context loss:
+The renderer does **not** rebuild GPU resources in place — it deliberately does not request context restoration. The supported handling is to reload the app on context loss:
 
 ```ts
 renderer.on('contextLost', () => {

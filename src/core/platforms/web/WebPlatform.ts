@@ -32,10 +32,10 @@ export class WebPlatform extends Platform {
     const buffer = 4;
 
     const runLoop = (currentTime: number = 0) => {
-      // While the GL context is lost, issue no GL calls. Keep a slow heartbeat
-      // so the loop resumes automatically once the context is restored.
+      // The GL context is lost and the engine does not rebuild it in place.
+      // Stop the loop entirely (no reschedule) so we issue no GL calls against
+      // a dead context. Recovery is via app reload (see the `contextLost` event).
       if (stage.isContextLost === true) {
-        setTimeout(requestLoop, 1000);
         return;
       }
 
