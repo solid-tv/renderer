@@ -146,6 +146,49 @@ export interface RendererMainCriticalCleanupFailedEvent {
 }
 
 /**
+ * WebGL Context Lost Event Data
+ *
+ * @remarks
+ * Fired when the underlying WebGL context is lost (e.g. on low-RAM devices
+ * running Chromium 123+ after the app has been backgrounded). The render loop
+ * is paused automatically; in-engine GL resources are NOT rebuilt, so the
+ * recommended handling is to reload the app.
+ *
+ * @category Events
+ * @example
+ * ```typescript
+ * renderer.on('contextLost', () => {
+ *   window.location.reload();
+ * });
+ * ```
+ */
+export interface RendererMainContextLostEvent {
+  /** This event has no payload - listen without parameters */
+  readonly __eventHasNoPayload?: never;
+}
+
+/**
+ * WebGL Context Restored Event Data
+ *
+ * @remarks
+ * Fired when a previously lost WebGL context is restored. The render loop
+ * resumes automatically. Note that in-engine GL resources (textures, programs,
+ * buffers) are NOT automatically re-uploaded.
+ *
+ * @category Events
+ * @example
+ * ```typescript
+ * renderer.on('contextRestored', () => {
+ *   console.log('WebGL context restored');
+ * });
+ * ```
+ */
+export interface RendererMainContextRestoredEvent {
+  /** This event has no payload - listen without parameters */
+  readonly __eventHasNoPayload?: never;
+}
+
+/**
  * Settings for the Renderer that can be updated during runtime.
  */
 export interface RendererRuntimeSettings {
@@ -506,6 +549,8 @@ export type RendererMainSettings = RendererRuntimeSettings & {
  * @see {@link RendererMainIdleEvent}
  * @see {@link RendererMainCriticalCleanupEvent}
  * @see {@link RendererMainCriticalCleanupFailedEvent}
+ * @see {@link RendererMainContextLostEvent}
+ * @see {@link RendererMainContextRestoredEvent}
  *
  * @fires RendererMain#fpsUpdate
  * @fires RendererMain#frameTick
@@ -513,6 +558,8 @@ export type RendererMainSettings = RendererRuntimeSettings & {
  * @fires RendererMain#idle
  * @fires RendererMain#criticalCleanup
  * @fires RendererMain#criticalCleanupFailed
+ * @fires RendererMain#contextLost
+ * @fires RendererMain#contextRestored
  */
 export class RendererMain extends EventEmitter {
   readonly root: INode;
