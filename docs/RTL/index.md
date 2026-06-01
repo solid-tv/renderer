@@ -110,7 +110,7 @@ renderer.createTextNode({
   w: 560,
   rtl: true, // or inherit from an rtl ancestor
   textRendererOverride: 'canvas',
-  fontFamily: 'Ubuntu',
+  fontFamily: 'NotoSansHebrew', // a font that actually covers the script
   fontSize: 40,
   text: 'שלום world 123',
   parent: root,
@@ -123,6 +123,12 @@ the runs: `שלום world 123` renders as `world 123 שלום`, `90 דקות` re
 
 The text renderer detects direction from the node's resolved `rtl` flag; there
 is no separate tokenizer to configure and no extra dependency to install.
+
+> **Use a font that covers the script.** The Canvas renderer draws with the font
+> you load via `stage.loadFont('canvas', …)`. If that font lacks Hebrew (or
+> Arabic) glyphs, the browser falls back to a system font, which varies between
+> machines. Load a script-covering font (e.g. Noto Sans Hebrew) and reference it
+> by `fontFamily` so rendering is consistent everywhere.
 
 ### Bidirectional concatenation
 

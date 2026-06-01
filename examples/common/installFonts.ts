@@ -42,6 +42,19 @@ export async function installFonts(stage: Stage) {
     metrics: ubuntuModifiedMetrics,
   });
 
+  // Bundled Hebrew-capable font so RTL/bidi text tests don't depend on a
+  // non-deterministic system font fallback. Noto Sans Hebrew also covers Latin.
+  stage.loadFont('canvas', {
+    fontFamily: 'NotoSansHebrew',
+    fontUrl: './fonts/NotoSansHebrew-Regular.ttf',
+    metrics: {
+      ascender: 1069,
+      descender: -293,
+      lineGap: 0,
+      unitsPerEm: 1000,
+    },
+  });
+
   // Load SDF fonts for WebGL renderer using the new unified API
   if (stage.renderer.mode === 'webgl') {
     stage.loadFont('sdf', {

@@ -50,7 +50,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
         y: 80 + i * ROW_H,
         w: COL_W,
         rtl,
-        fontFamily: 'Ubuntu',
+        fontFamily: 'NotoSansHebrew',
         fontSize: 40,
         color: 0xffd700ff,
         forceLoad: true,
