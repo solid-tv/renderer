@@ -32,6 +32,7 @@ describe('set color()', () => {
     pivotX: 0,
     pivotY: 0,
     rotation: 0,
+    rtl: null,
     rtt: false,
     scale: 1,
     scaleX: 1,
@@ -1178,6 +1179,123 @@ describe('set color()', () => {
       expect(node.clippingRect.y).toBe(6);
       expect(node.clippingRect.w).toBe(20);
       expect(node.clippingRect.h).toBe(30);
+    });
+  });
+
+  describe('rtl direction', () => {
+    it('defaults to ltr (false) with no parent', () => {
+      const node = new CoreNode(stage, defaultProps());
+      expect(node.rtl).toBe(false);
+    });
+
+    it('reflects an explicit own value', () => {
+      const node = new CoreNode(stage, defaultProps());
+      node.rtl = true;
+      expect(node.rtl).toBe(true);
+      node.rtl = false;
+      expect(node.rtl).toBe(false);
+    });
+
+    it('inherits from the parent when own value is null', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.rtl = true;
+      const child = new CoreNode(stage, defaultProps({ parent }));
+      expect(child.rtl).toBe(true);
+    });
+
+    it('an explicit false on a child overrides an rtl parent', () => {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.rtl = true;
+      const child = new CoreNode(stage, defaultProps({ parent, rtl: false }));
+      expect(child.rtl).toBe(false);
+    });
+
+    it('resolves _rtl from the parent during update', () => {
+      const parent = new CoreNode(stage, defaultProps({ w: 200 }));
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+      parent._rtl = true;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.update(0, clippingRect);
+
+      expect(node._rtl).toBe(true);
+    });
+  });
+
+  describe('rtl layout mirroring', () => {
+    const makeRtlParent = (w: number) => {
+      const parent = new CoreNode(stage, defaultProps({ w }));
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+      parent._rtl = true;
+      return parent;
+    };
+
+    it("mirrors a child's x within the parent width", () => {
+      const parent = makeRtlParent(200);
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.x = 20;
+      node.y = 30;
+      node.w = 50;
+      node.h = 40;
+
+      node.update(0, clippingRect);
+
+      // 200 - x(20) - w(50) * scaleX(1) = 130; y is untouched.
+      expect(node.globalTransform!.tx).toBe(130);
+      expect(node.globalTransform!.ty).toBe(30);
+    });
+
+    it('accounts for scaleX when mirroring', () => {
+      const parent = makeRtlParent(200);
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.x = 20;
+      node.w = 50;
+      node.scaleX = 2;
+
+      node.update(0, clippingRect);
+
+      // 200 - 20 - 50 * 2 = 80
+      expect(node.globalTransform!.tx).toBe(80);
+    });
+
+    it('does not mirror when the parent is ltr', () => {
+      const parent = new CoreNode(stage, defaultProps({ w: 200 }));
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.x = 20;
+      node.w = 50;
+
+      node.update(0, clippingRect);
+
+      expect(node.globalTransform!.tx).toBe(20);
+    });
+
+    it('does not mirror when the parent width is unknown (0)', () => {
+      const parent = makeRtlParent(0);
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.x = 20;
+      node.w = 50;
+
+      node.update(0, clippingRect);
+
+      expect(node.globalTransform!.tx).toBe(20);
+    });
+
+    it('restores the cached local transform after mirroring', () => {
+      const parent = makeRtlParent(200);
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.x = 20;
+      node.w = 50;
+
+      node.update(0, clippingRect);
+
+      // The local transform must stay un-mirrored so the next frame doesn't
+      // double-apply the mirror.
+      expect(node.localTransform!.tx).toBe(20);
     });
   });
 });

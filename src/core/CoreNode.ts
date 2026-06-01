@@ -176,6 +176,15 @@ export enum UpdateType {
    * Autosize update
    */
   Autosize = 8192,
+
+  /**
+   * Layout direction (RTL) update
+   *
+   * @remarks
+   * CoreNode Properties Updated:
+   * - `_rtl` (resolved from `_ownRtl` / inherited from parent)
+   */
+  Direction = 16384,
   /**
    * None
    */
@@ -184,7 +193,7 @@ export enum UpdateType {
   /**
    * All
    */
-  All = 16383,
+  All = 32767,
 }
 
 /**
@@ -622,6 +631,24 @@ export interface CoreNodeProps {
   rotation: number;
 
   /**
+   * Right-to-left layout direction.
+   *
+   * @remarks
+   * When `true`, this Node's children are laid out mirrored horizontally: a
+   * child's `x` is measured from the parent's right edge instead of its left,
+   * and text alignment (`left`/`right`) is reversed. The flag is inherited by
+   * descendants, so setting it on the root mirrors the whole application. Set
+   * an explicit `false` on a sub-tree to opt back into left-to-right.
+   *
+   * `null` (the default) means "inherit from parent".
+   *
+   * **Caveat:** mirroring requires the parent's width (`w`) to be known.
+   *
+   * @default null
+   */
+  rtl: boolean | null;
+
+  /**
    * Whether the Node is rendered to a texture
    *
    * @remarks
@@ -844,6 +871,19 @@ export class CoreNode extends EventEmitter {
    */
   public _globalIsTranslate = true;
 
+  /**
+   * Locally-set layout direction: `true`/`false` to force RTL/LTR on this
+   * sub-tree, or `null` to inherit from the parent. Source of truth for the
+   * public `rtl` setter; the resolved value lives in `_rtl`.
+   */
+  public _ownRtl: boolean | null = null;
+  /**
+   * Resolved layout direction (own override, else inherited from parent).
+   * Read directly in the world-transform hot path, so it is kept as a plain
+   * boolean field updated during `update()` on `UpdateType.Direction`.
+   */
+  public _rtl = false;
+
   public worldAlpha = 1;
   public premultipliedColorTl = 0;
   public premultipliedColorTr = 0;
@@ -876,7 +916,10 @@ export class CoreNode extends EventEmitter {
 
     //inital update type
     let initialUpdateType =
-      UpdateType.Local | UpdateType.RenderBounds | UpdateType.RenderState;
+      UpdateType.Local |
+      UpdateType.RenderBounds |
+      UpdateType.RenderState |
+      UpdateType.Direction;
 
     // Use the incoming props object directly — resolveNodeDefaults already
     // creates a fresh object with a consistent shape.  Save fields that are
@@ -885,6 +928,7 @@ export class CoreNode extends EventEmitter {
     const { texture, shader, src, rtt, boundsMargin, interactive, parent } =
       props;
     const p = (this.props = props);
+    this._ownRtl = typeof p.rtl === 'boolean' ? p.rtl : null;
     p.texture = null;
     p.shader = null;
     p.src = null;
@@ -1273,6 +1317,16 @@ export class CoreNode extends EventEmitter {
     this.updateType = 0;
     this.childUpdateType = 0;
 
+    if (updateType & UpdateType.Direction) {
+      if (this.resolveDirection() === true) {
+        // Our own mirrored position depends on parent direction (unchanged
+        // here), but our local transform may need to reflow (text alignment)
+        // and every descendant must re-resolve + re-mirror.
+        updateType |= UpdateType.Local | UpdateType.Children;
+        childUpdateType |= UpdateType.Direction;
+      }
+    }
+
     if (updateType & UpdateType.Local) {
       this.updateLocalTransform();
 
@@ -1288,6 +1342,21 @@ export class CoreNode extends EventEmitter {
       const lt = this.localTransform!;
       const gt = this.globalTransform!;
       let fastPathApplied = false;
+
+      // RTL: when the parent lays out right-to-left, flip this node's local x
+      // within the parent's width. This is a pure horizontal translation, so
+      // we shift lt.tx for the compose below and restore it afterwards to keep
+      // the cached local transform pristine for the next frame.
+      let rtlOrigTx = 0;
+      let rtlMirrored = false;
+      if (parent._rtl === true) {
+        const pw = parent.props.w;
+        if (pw !== 0) {
+          rtlOrigTx = lt.tx;
+          lt.tx += pw - 2 * props.x - props.w * props.scaleX;
+          rtlMirrored = true;
+        }
+      }
 
       if (
         USE_RTT &&
@@ -1359,6 +1428,10 @@ export class CoreNode extends EventEmitter {
         } else {
           gt.translateOrMultiply(lt);
         }
+      }
+
+      if (rtlMirrored === true) {
+        lt.tx = rtlOrigTx;
       }
       this.calculateRenderCoords();
       this.updateBoundingRect();
@@ -2186,6 +2259,56 @@ export class CoreNode extends EventEmitter {
   set data(d: CustomDataMap | undefined) {
     this.props.data = d;
   }
+
+  get rtl(): boolean {
+    if (this._ownRtl !== null) {
+      return this._ownRtl;
+    }
+    const parent = this.props.parent;
+    return parent !== null ? parent.rtl : false;
+  }
+
+  set rtl(value: boolean | null) {
+    const own = typeof value === 'boolean' ? value : null;
+    if (own === this._ownRtl) {
+      return;
+    }
+    this._ownRtl = own;
+    this.props.rtl = own;
+
+    if (this.props.parent === null) {
+      // Root has no parent to inherit from: resolve immediately and push the
+      // direction down to children (the root is driven by Stage.drawFrame and
+      // never runs the Direction branch of `update()` itself).
+      this._rtl = own ?? false;
+      this.childUpdateType |= UpdateType.Direction;
+      this.setUpdateType(UpdateType.Children);
+    } else {
+      this.setUpdateType(UpdateType.Direction);
+    }
+  }
+
+  /**
+   * Resolve the layout direction (own override, else inherited from parent)
+   * and apply it. Returns `true` when the resolved value changed.
+   */
+  resolveDirection(): boolean {
+    const own = this._ownRtl;
+    const parent = this.props.parent;
+    const resolved = own !== null ? own : parent !== null ? parent._rtl : false;
+    if (resolved === this._rtl) {
+      return false;
+    }
+    this._rtl = resolved;
+    this.onDirectionChanged(resolved);
+    return true;
+  }
+
+  /**
+   * Hook invoked when the resolved layout direction changes. Base
+   * implementation is a no-op; `CoreTextNode` overrides it to reflow text.
+   */
+  protected onDirectionChanged(_rtl: boolean): void {}
 
   get x(): number {
     return this.props.x;

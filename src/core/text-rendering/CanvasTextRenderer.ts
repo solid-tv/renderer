@@ -8,7 +8,7 @@ import type {
 import * as CanvasFontHandler from './CanvasFontHandler.js';
 import type { CoreTextNodeProps } from '../CoreTextNode.js';
 import { hasZeroWidthSpace } from './Utils.js';
-import { mapTextLayout } from './TextLayoutEngine.js';
+import { mapTextLayout, resolveTextAlign } from './TextLayoutEngine.js';
 
 const MAX_TEXTURE_DIMENSION = 4096;
 
@@ -130,7 +130,7 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
     CanvasFontHandler.measureText,
     metrics,
     text,
-    textAlign,
+    resolveTextAlign(textAlign, props.rtl === true),
     fontFamily,
     lineHeight,
     overflowSuffix,

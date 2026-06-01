@@ -37,6 +37,7 @@ const defaultProps = (
   pivotX: 0,
   pivotY: 0,
   rotation: 0,
+  rtl: null,
   rtt: false,
   scale: 1,
   scaleX: 1,

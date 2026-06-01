@@ -15,7 +15,7 @@ import type { WebGlCtxTexture } from '../renderers/webgl/WebGlCtxTexture.js';
 import type { WebGlShaderNode } from '../renderers/webgl/WebGlShaderNode.js';
 import { isProductionEnvironment } from '../../utils.js';
 import type { TextLayout, GlyphLayout } from './TextRenderer.js';
-import { mapTextLayout } from './TextLayoutEngine.js';
+import { mapTextLayout, resolveTextAlign } from './TextLayoutEngine.js';
 import type { RectWithValid } from '../lib/utils.js';
 import type { Dimensions } from '../../common/CommonTypes.js';
 
@@ -37,7 +37,13 @@ const font: FontHandler = SdfFontHandler;
 const layoutCache = new Map<string, TextLayout>();
 
 const getLayoutCacheKey = (props: CoreTextNodeProps): string =>
-  `${props.fontFamily}-${props.fontStyle}-${props.fontSize}-${props.letterSpacing}-${props.lineHeight}-${props.maxHeight}-${props.maxWidth}-${props.maxLines}-${props.textAlign}-${props.wordBreak}-${props.overflowSuffix}-${props.text}`;
+  `${props.fontFamily}-${props.fontStyle}-${props.fontSize}-${
+    props.letterSpacing
+  }-${props.lineHeight}-${props.maxHeight}-${props.maxWidth}-${
+    props.maxLines
+  }-${props.textAlign}-${props.rtl === true ? 1 : 0}-${props.wordBreak}-${
+    props.overflowSuffix
+  }-${props.text}`;
 
 /**
  * SDF text renderer using MSDF/SDF fonts with WebGL
@@ -255,7 +261,7 @@ const generateTextLayout = (
     SdfFontHandler.measureText,
     metrics,
     props.text,
-    props.textAlign,
+    resolveTextAlign(props.textAlign, props.rtl === true),
     fontFamily,
     lineHeight,
     props.overflowSuffix,
