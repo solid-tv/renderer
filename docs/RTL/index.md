@@ -155,9 +155,12 @@ logic lives in the application, not the renderer.
 
 ## Limitations
 
-- **SDF text is not yet bidi-aware.** Signed-distance-field text renders glyphs
-  in logical order, so mixed/RTL strings will look incorrect. Use
-  `textRendererOverride: 'canvas'` for RTL text for now.
+- **RTL text requires the Canvas renderer.** Bidi rendering relies on the
+  browser's text engine, which the SDF (WebGL) renderer does not use — SDF draws
+  glyphs in logical order, so mixed/RTL strings render incorrectly. This is a
+  design decision, not a pending feature: render RTL text nodes with
+  `textRendererOverride: 'canvas'`. (Layout mirroring and alignment still apply
+  to SDF nodes; only the character ordering is wrong.)
 - **Arabic shaping** (contextual letter joining) is out of scope. Hebrew and
   other non-joining scripts, plus mixed LTR, are supported on Canvas.
 - **`letterSpacing` is ignored for RTL text.** Per-character spacing is drawn
