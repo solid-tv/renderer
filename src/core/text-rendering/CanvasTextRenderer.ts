@@ -12,6 +12,16 @@ import { mapTextLayout, resolveTextAlign } from './TextLayoutEngine.js';
 
 const MAX_TEXTURE_DIMENSION = 4096;
 
+// Bidi base-direction control characters. `ctx.direction = 'rtl'` is only
+// available from Chrome 63+, but the language/runtime floor is Chrome 38, so we
+// force the RTL base direction by wrapping the line in a Right-to-Left Embedding
+// (RLE) ... Pop Directional Formatting (PDF) pair. The browser's built-in
+// fillText bidi then reorders mixed LTR/RTL runs on every supported browser.
+// RLE (embedding) keeps the Unicode Bidi Algorithm running inside the run, so
+// Latin words and numbers stay left-to-right — unlike RLO (override).
+const RLE = '\u202B';
+const PDF = '\u202C';
+
 const type = 'canvas' as const;
 const font: FontHandler = CanvasFontHandler;
 
@@ -116,7 +126,12 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
 
   const metrics = CanvasFontHandler.getFontMetrics(fontFamily, fontSize);
 
-  const letterSpacing = props.letterSpacing;
+  const isRtl = props.rtl === true;
+  // Per-character letterSpacing is drawn glyph-by-glyph left-to-right, which
+  // defeats the browser's bidi reordering. Native ctx.letterSpacing is Chrome
+  // 99+ (below our Chrome 38 floor), so letterSpacing is unsupported for RTL
+  // text: force it to 0 here so the measured layout matches the whole-line draw.
+  const letterSpacing = isRtl === true ? 0 : props.letterSpacing;
 
   const [
     lines,
@@ -154,6 +169,12 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
   context.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
   context.font = font;
   context.textBaseline = 'alphabetic';
+  // Anchor every line by its left edge at line[3] regardless of direction
+  // ('start' would flip to the right edge under RTL). Set direction for modern
+  // browsers; the RLE/PDF wrap below covers the Chrome 38 floor. The context is
+  // shared across renders, so both are set unconditionally to reset prior state.
+  context.textAlign = 'left';
+  context.direction = isRtl === true ? 'rtl' : 'ltr';
 
   // Performance optimization for large fonts
   if (fontSize >= 128) {
@@ -167,7 +188,10 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
     const textLine = line[0];
     let currentX = Math.ceil(line[3]);
     const currentY = Math.ceil(line[4]);
-    if (letterSpacing === 0) {
+    if (isRtl === true) {
+      // Force RTL base direction so the browser's bidi reorders mixed runs.
+      context.fillText(RLE + textLine + PDF, currentX, currentY);
+    } else if (letterSpacing === 0) {
       context.fillText(textLine, currentX, currentY);
     } else {
       const textLineLength = textLine.length;
