@@ -459,6 +459,24 @@ export type RendererMainSettings = RendererRuntimeSettings & {
   createImageBitmapSupport: 'auto' | 'basic' | 'options' | 'full';
 
   /**
+   * Override for whether `createImageBitmap(..., { premultiplyAlpha: 'premultiply' })`
+   * is actually honored by the target device.
+   *
+   * @remarks
+   * Some older browsers (notably older Safari/WebKit) accept the
+   * `premultiplyAlpha: 'premultiply'` option without throwing but silently
+   * ignore it, returning straight (non-premultiplied) alpha. This causes edge
+   * "ghosting" on images with transparency.
+   *
+   * Leave `undefined`/`null` to auto-detect via a startup probe. Set to a
+   * boolean to skip the probe entirely and force the value — useful on known
+   * fleet devices where the probe is unnecessary overhead or unreliable.
+   *
+   * @defaultValue `null` (auto-detect)
+   */
+  premultiplyAlphaHonored?: boolean | null;
+
+  /**
    * Provide an alternative platform abstraction layer
    *
    * @remarks
@@ -586,6 +604,12 @@ export class RendererMain extends EventEmitter {
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
       createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
+      // undefined -> true (assume honored, no probe); explicit null -> run the
+      // probe; explicit boolean -> force the value.
+      premultiplyAlphaHonored:
+        settings.premultiplyAlphaHonored === undefined
+          ? true
+          : settings.premultiplyAlphaHonored,
       platform: settings.platform || null,
       maxRetryCount: settings.maxRetryCount ?? 5,
     };
@@ -646,6 +670,7 @@ export class RendererMain extends EventEmitter {
       targetFPS: settings.targetFPS!,
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit!,
       createImageBitmapSupport: settings.createImageBitmapSupport!,
+      premultiplyAlphaHonored: settings.premultiplyAlphaHonored ?? null,
       platform,
       maxRetryCount: settings.maxRetryCount ?? 5,
     });

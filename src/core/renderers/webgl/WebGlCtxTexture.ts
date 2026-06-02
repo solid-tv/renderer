@@ -188,9 +188,13 @@ export class WebGlCtxTexture extends CoreContextTexture {
       w = tdata.width;
       h = tdata.height;
       glw.bindTexture(this._nativeCtxTexture);
+      // `premultiplyAlpha` carries the source's GL-upload intent: true when the
+      // source pixels are straight and WebGL must premultiply (e.g. a straight
+      // bitmap produced when the device ignores the createImageBitmap
+      // premultiply option), false when the source is already premultiplied.
       glw.pixelStorei(
         glw.UNPACK_PREMULTIPLY_ALPHA_WEBGL,
-        isImageBitmap ? false : !!textureData.premultiplyAlpha,
+        !!textureData.premultiplyAlpha,
       );
 
       glw.texImage2D(0, format, format, glw.UNSIGNED_BYTE, tdata);
