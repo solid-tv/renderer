@@ -43,12 +43,14 @@ function createImageWorker() {
     options: {
       supportsOptionsCreateImageBitmap: boolean;
       supportsFullCreateImageBitmap: boolean;
+      premultiplyAlphaHonored: boolean;
     },
   ): Promise<getImageReturn> {
     return new Promise(function (resolve, reject) {
       var supportsOptionsCreateImageBitmap =
         options.supportsOptionsCreateImageBitmap;
       var supportsFullCreateImageBitmap = options.supportsFullCreateImageBitmap;
+      var premultiplyAlphaHonored = options.premultiplyAlphaHonored;
       var xhr = new XMLHttpRequest();
       xhr.open('GET', src, true);
       xhr.responseType = 'blob';
@@ -71,6 +73,17 @@ function createImageWorker() {
             ? premultiplyAlpha
             : hasAlphaChannel(blob.type);
 
+        // When the device ignores the createImageBitmap premultiply option,
+        // create a straight ('none') bitmap and let WebGL premultiply on
+        // upload. `premultiplyAlpha` in the resolved value means "WebGL should
+        // premultiply this source on upload".
+        var useGlPremultiply =
+          withAlphaChannel === true && premultiplyAlphaHonored === false;
+        var bitmapMode: 'premultiply' | 'none' =
+          withAlphaChannel === true && useGlPremultiply === false
+            ? 'premultiply'
+            : 'none';
+
         // createImageBitmap with crop and options
         if (
           supportsFullCreateImageBitmap === true &&
@@ -78,12 +91,12 @@ function createImageWorker() {
           height !== null
         ) {
           createImageBitmap(blob, x || 0, y || 0, width, height, {
-            premultiplyAlpha: withAlphaChannel ? 'premultiply' : 'none',
+            premultiplyAlpha: bitmapMode,
             colorSpaceConversion: 'none',
             imageOrientation: 'none',
           })
             .then(function (data) {
-              resolve({ data: data, premultiplyAlpha: withAlphaChannel });
+              resolve({ data: data, premultiplyAlpha: useGlPremultiply });
             })
             .catch(function (error) {
               reject(error);
@@ -94,22 +107,23 @@ function createImageWorker() {
           supportsFullCreateImageBitmap === false
         ) {
           // Fallback for browsers that do not support createImageBitmap with options
-          // this is supported for Chrome v50 to v52/54 that doesn't support options
+          // this is supported for Chrome v50 to v52/54 that doesn't support options.
+          // The browser default premultiplies, so WebGL must not premultiply again.
           createImageBitmap(blob)
             .then(function (data) {
-              resolve({ data: data, premultiplyAlpha: withAlphaChannel });
+              resolve({ data: data, premultiplyAlpha: false });
             })
             .catch(function (error) {
               reject(error);
             });
         } else {
           createImageBitmap(blob, {
-            premultiplyAlpha: withAlphaChannel ? 'premultiply' : 'none',
+            premultiplyAlpha: bitmapMode,
             colorSpaceConversion: 'none',
             imageOrientation: 'none',
           })
             .then(function (data) {
-              resolve({ data: data, premultiplyAlpha: withAlphaChannel });
+              resolve({ data: data, premultiplyAlpha: useGlPremultiply });
             })
             .catch(function (error) {
               reject(error);
@@ -139,10 +153,13 @@ function createImageWorker() {
     // these will be set to true if the browser supports the createImageBitmap options or full
     var supportsOptionsCreateImageBitmap = false;
     var supportsFullCreateImageBitmap = false;
+    // set to false when the device is known to ignore the premultiply option
+    var premultiplyAlphaHonored = true;
 
     getImage(src, premultiplyAlpha, x, y, width, height, {
       supportsOptionsCreateImageBitmap,
       supportsFullCreateImageBitmap,
+      premultiplyAlphaHonored,
     })
       .then(function (data) {
         // @ts-ignore ts has wrong postMessage signature
@@ -237,6 +254,13 @@ export class ImageWorkerManager {
       workerCode = workerCode.replace(
         'var supportsFullCreateImageBitmap = false;',
         'var supportsFullCreateImageBitmap = true;',
+      );
+    }
+
+    if (createImageBitmapSupport.premultiplyHonored === false) {
+      workerCode = workerCode.replace(
+        'var premultiplyAlphaHonored = true;',
+        'var premultiplyAlphaHonored = false;',
       );
     }
 

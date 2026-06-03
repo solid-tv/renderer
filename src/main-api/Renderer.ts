@@ -459,6 +459,25 @@ export type RendererMainSettings = RendererRuntimeSettings & {
   createImageBitmapSupport: 'auto' | 'basic' | 'options' | 'full';
 
   /**
+   * Override for whether `createImageBitmap(..., { premultiplyAlpha: 'premultiply' })`
+   * is actually honored by the target device.
+   *
+   * @remarks
+   * Some older browsers (notably older Safari/WebKit) accept the
+   * `premultiplyAlpha: 'premultiply'` option without throwing but silently
+   * ignore it, returning straight (non-premultiplied) alpha. This causes edge
+   * "ghosting" on images with transparency.
+   *
+   * Set to `'auto'` to detect via a cheap startup probe (one 1×1 texture
+   * upload + framebuffer readback). Set to a boolean to force the value. Leave
+   * unset to assume the option is honored — the default, which preserves
+   * existing behavior with no probe overhead.
+   *
+   * @defaultValue `true` (assume honored; no probe)
+   */
+  premultiplyAlphaHonored?: boolean | 'auto';
+
+  /**
    * Provide an alternative platform abstraction layer
    *
    * @remarks
@@ -586,6 +605,12 @@ export class RendererMain extends EventEmitter {
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
       createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
+      // undefined -> true (assume honored, no probe); 'auto' -> probe;
+      // explicit boolean -> force the value.
+      premultiplyAlphaHonored:
+        settings.premultiplyAlphaHonored === undefined
+          ? true
+          : settings.premultiplyAlphaHonored,
       platform: settings.platform || null,
       maxRetryCount: settings.maxRetryCount ?? 5,
     };
@@ -646,6 +671,7 @@ export class RendererMain extends EventEmitter {
       targetFPS: settings.targetFPS!,
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit!,
       createImageBitmapSupport: settings.createImageBitmapSupport!,
+      premultiplyAlphaHonored: settings.premultiplyAlphaHonored,
       platform,
       maxRetryCount: settings.maxRetryCount ?? 5,
     });

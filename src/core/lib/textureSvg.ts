@@ -91,8 +91,11 @@ export const loadSvg = async (
     }
   }
 
+  // getImageData returns straight (un-premultiplied) pixels, so WebGL must
+  // premultiply this source on upload (unlike the ImageBitmap path above,
+  // where the canvas is already premultiplied by createImageBitmap's default).
   return {
     data: ctx.getImageData(0, 0, physW, physH),
-    premultiplyAlpha: false,
+    premultiplyAlpha: true,
   };
 };

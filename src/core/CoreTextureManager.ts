@@ -10,6 +10,7 @@ import { EventEmitter } from '../common/EventEmitter.js';
 import type { Stage } from './Stage.js';
 import {
   validateCreateImageBitmap,
+  detectPremultiplyAlphaHonored,
   type CreateImageBitmapSupport,
 } from './lib/validateImageBitmap.js';
 import type { Platform } from './platforms/Platform.js';
@@ -46,6 +47,9 @@ export interface TextureManagerDebugInfo {
 export interface TextureManagerSettings {
   numImageWorkers: number;
   createImageBitmapSupport: 'auto' | 'basic' | 'options' | 'full';
+  // Override for whether createImageBitmap honors premultiplyAlpha:'premultiply'.
+  // 'auto' = detect via probe; boolean = force the value and skip the probe.
+  premultiplyAlphaHonored: boolean | 'auto';
   maxRetryCount: number;
 }
 
@@ -255,6 +259,7 @@ export class CoreTextureManager extends EventEmitter {
     basic: false,
     options: false,
     full: false,
+    premultiplyHonored: null as boolean | null,
   };
 
   hasWorker = !!self.Worker;
@@ -281,8 +286,12 @@ export class CoreTextureManager extends EventEmitter {
   constructor(stage: Stage, settings: TextureManagerSettings) {
     super();
 
-    const { numImageWorkers, createImageBitmapSupport, maxRetryCount } =
-      settings;
+    const {
+      numImageWorkers,
+      createImageBitmapSupport,
+      premultiplyAlphaHonored,
+      maxRetryCount,
+    } = settings;
 
     this.stage = stage;
     this.platform = stage.platform;
@@ -292,7 +301,7 @@ export class CoreTextureManager extends EventEmitter {
     if (createImageBitmapSupport === 'auto') {
       validateCreateImageBitmap(this.platform)
         .then((result) => {
-          this.initialize(result);
+          this.resolvePremultiplyAndInit(result, premultiplyAlphaHonored);
         })
         .catch(() => {
           console.warn(
@@ -304,11 +313,15 @@ export class CoreTextureManager extends EventEmitter {
           this.emit('initialized');
         });
     } else {
-      this.initialize({
-        basic: createImageBitmapSupport === 'basic',
-        options: createImageBitmapSupport === 'options',
-        full: createImageBitmapSupport === 'full',
-      });
+      this.resolvePremultiplyAndInit(
+        {
+          basic: createImageBitmapSupport === 'basic',
+          options: createImageBitmapSupport === 'options',
+          full: createImageBitmapSupport === 'full',
+          premultiplyHonored: null,
+        },
+        premultiplyAlphaHonored,
+      );
     }
 
     this.registerTextureType('ImageTexture', ImageTexture);
@@ -325,10 +338,50 @@ export class CoreTextureManager extends EventEmitter {
     this.txConstructors[textureType] = textureClass;
   }
 
+  /**
+   * Resolve `premultiplyHonored` on the support object, then initialize.
+   *
+   * - boolean override -> use it directly, skip the probe
+   * - 'auto' -> run the detection probe (only meaningful when the options/full
+   *   API exists, since that's the only path that passes the premultiply option)
+   */
+  private resolvePremultiplyAndInit(
+    support: CreateImageBitmapSupport,
+    premultiplyAlphaHonored: boolean | 'auto',
+  ): void {
+    if (premultiplyAlphaHonored !== 'auto') {
+      support.premultiplyHonored = premultiplyAlphaHonored;
+      this.initialize(support);
+      return;
+    }
+
+    if (support.options === false && support.full === false) {
+      support.premultiplyHonored = null;
+      this.initialize(support);
+      return;
+    }
+
+    detectPremultiplyAlphaHonored(this.platform)
+      .then((honored) => {
+        support.premultiplyHonored = honored;
+        this.initialize(support);
+      })
+      .catch(() => {
+        support.premultiplyHonored = null;
+        this.initialize(support);
+      });
+  }
+
   private initialize(support: CreateImageBitmapSupport) {
     this.hasCreateImageBitmap =
       support.basic || support.options || support.full;
     this.imageBitmapSupported = support;
+
+    if (support.premultiplyHonored === false) {
+      console.warn(
+        '[Lightning] createImageBitmap premultiplyAlpha:"premultiply" is not honored on this device — images may show alpha ghosting. GL-side premultiply fallback recommended.',
+      );
+    }
 
     if (this.hasCreateImageBitmap === false) {
       console.warn(

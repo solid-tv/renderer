@@ -192,6 +192,18 @@ export class ImageTexture extends Texture {
     const hasAlphaChannel = premultiplyAlpha ?? blob.type.includes('image/png');
     const imageBitmapSupported = this.txManager.imageBitmapSupported;
 
+    // When the device does NOT honor the createImageBitmap premultiply option
+    // (e.g. older Safari), request a straight ('none') bitmap and let WebGL
+    // premultiply on upload instead. `premultiplyAlpha` in the returned
+    // TextureData means "WebGL should premultiply this source on upload".
+    const useGlPremultiply =
+      hasAlphaChannel === true &&
+      imageBitmapSupported.premultiplyHonored === false;
+    const bitmapMode: 'premultiply' | 'none' =
+      hasAlphaChannel === true && useGlPremultiply === false
+        ? 'premultiply'
+        : 'none';
+
     if (imageBitmapSupported.full === true && sw !== null && sh !== null) {
       // createImageBitmap with crop
       const bitmap = await this.platform.createImageBitmap(
@@ -201,28 +213,29 @@ export class ImageTexture extends Texture {
         sw,
         sh,
         {
-          premultiplyAlpha: hasAlphaChannel ? 'premultiply' : 'none',
+          premultiplyAlpha: bitmapMode,
           colorSpaceConversion: 'none',
           imageOrientation: 'none',
         },
       );
-      return { data: bitmap, premultiplyAlpha: hasAlphaChannel };
+      return { data: bitmap, premultiplyAlpha: useGlPremultiply };
     } else if (imageBitmapSupported.basic === true) {
       // basic createImageBitmap without options or crop
-      // this is supported for Chrome v50 to v52/54 that doesn't support options
+      // this is supported for Chrome v50 to v52/54 that doesn't support options.
+      // The browser default premultiplies, so WebGL must not premultiply again.
       return {
         data: await this.platform.createImageBitmap(blob),
-        premultiplyAlpha: hasAlphaChannel,
+        premultiplyAlpha: false,
       };
     }
 
     // default createImageBitmap without crop but with options
     const bitmap = await this.platform.createImageBitmap(blob, {
-      premultiplyAlpha: hasAlphaChannel ? 'premultiply' : 'none',
+      premultiplyAlpha: bitmapMode,
       colorSpaceConversion: 'none',
       imageOrientation: 'none',
     });
-    return { data: bitmap, premultiplyAlpha: hasAlphaChannel };
+    return { data: bitmap, premultiplyAlpha: useGlPremultiply };
   }
 
   async loadImage(src: string) {
@@ -274,9 +287,14 @@ export class ImageTexture extends Texture {
       };
     }
 
+    // The loader computes whether WebGL should premultiply this source on
+    // upload (it depends on the source type and on whether createImageBitmap
+    // honored the premultiply option). Preserve it; fall back to the prop only
+    // when the loader didn't decide.
     return {
       data: resp.data,
-      premultiplyAlpha: this.props.premultiplyAlpha ?? true,
+      premultiplyAlpha:
+        resp.premultiplyAlpha ?? this.props.premultiplyAlpha ?? true,
     };
   }
 

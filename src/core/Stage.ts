@@ -179,6 +179,7 @@ export class Stage {
       renderEngine,
       fontEngines,
       createImageBitmapSupport,
+      premultiplyAlphaHonored,
       platform,
       maxRetryCount,
     } = options;
@@ -206,6 +207,8 @@ export class Stage {
     this.txManager = new CoreTextureManager(this, {
       numImageWorkers,
       createImageBitmapSupport,
+      // undefined -> true (default: assume honored, no probe)
+      premultiplyAlphaHonored: premultiplyAlphaHonored ?? true,
       maxRetryCount,
     });
 
