@@ -207,7 +207,7 @@ export class Stage {
     this.txManager = new CoreTextureManager(this, {
       numImageWorkers,
       createImageBitmapSupport,
-      premultiplyAlphaHonored: premultiplyAlphaHonored ?? null,
+      premultiplyAlphaHonored,
       maxRetryCount,
     });
 

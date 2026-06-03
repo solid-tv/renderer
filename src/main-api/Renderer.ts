@@ -468,13 +468,13 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    * ignore it, returning straight (non-premultiplied) alpha. This causes edge
    * "ghosting" on images with transparency.
    *
-   * Leave `undefined`/`null` to auto-detect via a startup probe. Set to a
-   * boolean to skip the probe entirely and force the value — useful on known
-   * fleet devices where the probe is unnecessary overhead or unreliable.
+   * Leave unset to auto-detect via a cheap startup probe. Set to a boolean to
+   * skip the probe entirely and force the value — useful on known fleet devices
+   * where the probe is unnecessary overhead or unreliable.
    *
-   * @defaultValue `null` (auto-detect)
+   * @defaultValue `undefined` (auto-detect via probe)
    */
-  premultiplyAlphaHonored?: boolean | null;
+  premultiplyAlphaHonored?: boolean;
 
   /**
    * Provide an alternative platform abstraction layer
@@ -604,12 +604,8 @@ export class RendererMain extends EventEmitter {
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
       createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
-      // undefined -> true (assume honored, no probe); explicit null -> run the
-      // probe; explicit boolean -> force the value.
-      premultiplyAlphaHonored:
-        settings.premultiplyAlphaHonored === undefined
-          ? true
-          : settings.premultiplyAlphaHonored,
+      // undefined -> probe; explicit boolean -> force the value.
+      premultiplyAlphaHonored: settings.premultiplyAlphaHonored,
       platform: settings.platform || null,
       maxRetryCount: settings.maxRetryCount ?? 5,
     };
@@ -670,7 +666,7 @@ export class RendererMain extends EventEmitter {
       targetFPS: settings.targetFPS!,
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit!,
       createImageBitmapSupport: settings.createImageBitmapSupport!,
-      premultiplyAlphaHonored: settings.premultiplyAlphaHonored ?? null,
+      premultiplyAlphaHonored: settings.premultiplyAlphaHonored,
       platform,
       maxRetryCount: settings.maxRetryCount ?? 5,
     });

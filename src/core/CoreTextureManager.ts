@@ -48,8 +48,8 @@ export interface TextureManagerSettings {
   numImageWorkers: number;
   createImageBitmapSupport: 'auto' | 'basic' | 'options' | 'full';
   // Override for whether createImageBitmap honors premultiplyAlpha:'premultiply'.
-  // null = auto-detect via probe; boolean = force the value and skip the probe.
-  premultiplyAlphaHonored: boolean | null;
+  // undefined = auto-detect via probe; boolean = force the value and skip it.
+  premultiplyAlphaHonored: boolean | undefined;
   maxRetryCount: number;
 }
 
@@ -342,14 +342,14 @@ export class CoreTextureManager extends EventEmitter {
    * Resolve `premultiplyHonored` on the support object, then initialize.
    *
    * - boolean override -> use it directly, skip the probe
-   * - null -> run the detection probe (only meaningful when the options/full
+   * - undefined -> run the detection probe (only meaningful when the options/full
    *   API exists, since that's the only path that passes the premultiply option)
    */
   private resolvePremultiplyAndInit(
     support: CreateImageBitmapSupport,
-    premultiplyAlphaHonored: boolean | null,
+    premultiplyAlphaHonored: boolean | undefined,
   ): void {
-    if (premultiplyAlphaHonored !== null) {
+    if (premultiplyAlphaHonored !== undefined) {
       support.premultiplyHonored = premultiplyAlphaHonored;
       this.initialize(support);
       return;
