@@ -468,13 +468,14 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    * ignore it, returning straight (non-premultiplied) alpha. This causes edge
    * "ghosting" on images with transparency.
    *
-   * Leave unset to auto-detect via a cheap startup probe. Set to a boolean to
-   * skip the probe entirely and force the value — useful on known fleet devices
-   * where the probe is unnecessary overhead or unreliable.
+   * Set to `'auto'` to detect via a cheap startup probe (one 1×1 texture
+   * upload + framebuffer readback). Set to a boolean to force the value. Leave
+   * unset to assume the option is honored — the default, which preserves
+   * existing behavior with no probe overhead.
    *
-   * @defaultValue `undefined` (auto-detect via probe)
+   * @defaultValue `true` (assume honored; no probe)
    */
-  premultiplyAlphaHonored?: boolean;
+  premultiplyAlphaHonored?: boolean | 'auto';
 
   /**
    * Provide an alternative platform abstraction layer
@@ -604,8 +605,12 @@ export class RendererMain extends EventEmitter {
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
       createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
-      // undefined -> probe; explicit boolean -> force the value.
-      premultiplyAlphaHonored: settings.premultiplyAlphaHonored,
+      // undefined -> true (assume honored, no probe); 'auto' -> probe;
+      // explicit boolean -> force the value.
+      premultiplyAlphaHonored:
+        settings.premultiplyAlphaHonored === undefined
+          ? true
+          : settings.premultiplyAlphaHonored,
       platform: settings.platform || null,
       maxRetryCount: settings.maxRetryCount ?? 5,
     };
