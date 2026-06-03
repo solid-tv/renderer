@@ -21,13 +21,13 @@ export async function automation(settings: ExampleSettings) {
 }
 
 export default async function test({ renderer, testRoot }: ExampleSettings) {
-  const PADDING = 20;
+  const PADDING = 80;
   const CELL = 220;
 
   testRoot.color = 0x808080ff; // neutral grey so both halo colors show
 
   renderer.createTextNode({
-    text: 'Premultiply Alpha — left column = premultiply:true (correct), right = false (Safari bug)',
+    text: 'Premultiply Alpha: left column = premultiply:true (correct), right = false (Safari bug)',
     fontFamily: 'Ubuntu',
     fontSize: 30,
     color: 0xffffffff,
@@ -41,7 +41,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
   const honored = (renderer as any).stage?.txManager?.imageBitmapSupported
     ?.premultiplyHonored;
   renderer.createTextNode({
-    text: `Device probe — createImageBitmap premultiplyAlpha honored: ${String(
+    text: `Device probe: createImageBitmap premultiplyAlpha honored: ${String(
       honored,
     )}`,
     fontFamily: 'Ubuntu',
@@ -102,7 +102,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
         .once('loaded', sizeToTexture);
 
       renderer.createTextNode({
-        text: `${col.label} — ${row.label}`,
+        text: `${col.label}, ${row.label}`,
         fontFamily: 'Ubuntu',
         fontSize: 22,
         color: 0xffffffff,
