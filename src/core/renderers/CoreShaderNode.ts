@@ -96,6 +96,12 @@ export class CoreShaderNode<Props extends object = Record<string, unknown>> {
   protected node: CoreNode | null = null;
   readonly time: CoreShaderType['time'] = undefined;
   update: (() => void) | undefined = undefined;
+  /**
+   * The shader-value cache key currently held by this node (set by the
+   * subclass `update()` after the most recent successful value resolution).
+   * Tracked on the base so {@link detachNode} can release it on teardown.
+   */
+  valueKey = '';
   private _valueKeyCache = '';
   private _valueKeyDirty = true;
   private _lastW = 0;
@@ -160,6 +166,23 @@ export class CoreShaderNode<Props extends object = Record<string, unknown>> {
 
   attachNode(node: CoreNode) {
     this.node = node;
+  }
+
+  /**
+   * Release this node's currently-held shader-value cache entry so the shader
+   * manager's idle `cleanup()` can reclaim it, and detach from the owning node.
+   *
+   * Called from {@link CoreNode.destroy}. Mirrors the `prevKey` release done on
+   * every value-key change in the subclass `update()`; without it a destroyed
+   * node's last value-cache entry stays pinned at usage >= 1 forever and can
+   * never be evicted.
+   */
+  detachNode() {
+    if (this.valueKey.length > 0) {
+      this.stage.shManager.mutateShaderValueUsage(this.valueKey, -1);
+      this.valueKey = '';
+    }
+    this.node = null;
   }
 
   createValueKey() {

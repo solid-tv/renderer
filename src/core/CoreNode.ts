@@ -2020,6 +2020,13 @@ export class CoreNode extends EventEmitter {
       this.stage.untrackTimedNode(this);
     }
 
+    // Release this node's shader-value cache entry so the shader manager's idle
+    // cleanup can reclaim it. Skip the shared default shader (never per-node).
+    const shader = this.props.shader;
+    if (shader !== null && shader !== this.stage.defShaderNode) {
+      shader.detachNode();
+    }
+
     if (USE_RTT && this.rtt === true) {
       this.stage.renderer.removeRTTNode(this);
     }
