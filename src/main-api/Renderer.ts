@@ -404,10 +404,7 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    * used) entries whenever the stage goes idle.
    *
    * Set this higher for content-dense UIs with many simultaneous unique
-   * strings, or lower to cap memory more aggressively. Strings longer than
-   * the renderer's internal length threshold are never cached regardless of
-   * this value, since long unique strings (e.g. descriptions) have a near-zero
-   * cache hit rate.
+   * strings, or lower to cap memory more aggressively.
    *
    * @defaultValue `250`
    */

@@ -24,13 +24,6 @@ const type = 'sdf' as const;
 
 let sdfShader: WebGlShaderNode | null = null;
 
-// Strings longer than this are never cached. Long strings (e.g. show
-// descriptions) are almost always unique and set once, so they have a
-// near-zero cache hit rate while being the largest entries — caching them is
-// all cost and no benefit. They still lay out and render normally; they just
-// don't enter the shared cache.
-const MAX_CACHED_TEXT_LENGTH = 100;
-
 // Upper bound on layoutCache entries, enforced on idle via `cleanup`.
 // Overridden from stage options in `init`. The cache is allowed to grow past
 // this during active rendering and is trimmed back to it when the stage idles.
@@ -101,9 +94,7 @@ const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
 
   // Calculate text layout and generate glyph data for caching
   layout = generateTextLayout(props, fontData);
-  if (props.text.length <= MAX_CACHED_TEXT_LENGTH) {
-    layoutCache.set(cacheKey, layout);
-  }
+  layoutCache.set(cacheKey, layout);
 
   // For SDF renderer, ImageData is null since we render via WebGL
   return {

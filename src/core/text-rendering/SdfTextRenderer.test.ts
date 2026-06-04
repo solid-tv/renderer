@@ -86,24 +86,14 @@ describe('SdfTextRenderer layout cache', () => {
     expect(SdfFontHandler.getFontData).toHaveBeenCalledTimes(1);
   });
 
-  it('does not cache strings longer than the threshold (100 chars)', () => {
+  it('caches long strings too (no length-based skip)', () => {
     initRenderer(10);
-    const long = 'x'.repeat(101);
+    const long = 'x'.repeat(500);
 
     render(long);
     render(long);
 
-    // Never cached, so every render recomputes.
-    expect(SdfFontHandler.getFontData).toHaveBeenCalledTimes(2);
-  });
-
-  it('caches strings exactly at the threshold (100 chars)', () => {
-    initRenderer(10);
-    const atLimit = 'y'.repeat(100);
-
-    render(atLimit);
-    render(atLimit);
-
+    // Bounded purely by the LRU cap, not by length.
     expect(SdfFontHandler.getFontData).toHaveBeenCalledTimes(1);
   });
 
