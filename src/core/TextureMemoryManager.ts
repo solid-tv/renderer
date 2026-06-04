@@ -342,10 +342,36 @@ export class TextureMemoryManager {
       }, 1000);
     }
 
-    // If the threshold is 0, we disable the memory manager by replacing the
-    // setTextureMemUse method with a no-op function.
+    // If the threshold is 0, we disable memory tracking/cleanup by replacing the
+    // setTextureMemUse method with a no-op function. Note this only disables LRU
+    // tracking — GPU out-of-memory detection still runs (see handleOutOfMemory).
     if (criticalThreshold === 0) {
       this.setTextureMemUse = () => {};
     }
+  }
+
+  /**
+   * React to a real GPU out-of-memory reported by the renderer.
+   *
+   * @remarks
+   * WebGL never exposes the VRAM budget up front, so the only certain signal is
+   * a `GL_OUT_OF_MEMORY` after the fact. When it fires we queue an `outOfMemory`
+   * frame event carrying the estimated memory in use and the critical threshold
+   * in effect — the estimate is a *measured ceiling* (the real budget is at or
+   * below it). What to do about it (lower the threshold, persist, reload) is
+   * application policy, not the renderer's; see the `outOfMemory` event docs on
+   * the public Renderer for the recommended integration.
+   *
+   * The engine also requests an immediate cleanup as a best-effort mitigation
+   * to free non-renderable textures before the app reacts.
+   */
+  handleOutOfMemory(): void {
+    this.stage.queueFrameEvent('outOfMemory', {
+      memUsed: this.memUsed,
+      criticalThreshold: this.criticalThreshold,
+    });
+
+    // Free whatever non-renderable textures we can right now.
+    this.criticalCleanupRequested = true;
   }
 }

@@ -28,7 +28,7 @@ import { Platform } from '../core/platforms/Platform.js';
  * @category Events
  * @example
  * ```typescript
- * renderer.on('fpsUpdate', (data) => {
+ * renderer.on('fpsUpdate', (_target, data) => {
  *   console.log(`Current FPS: ${data.fps}`);
  *   if (data.contextSpyData) {
  *     console.log('WebGL calls:', data.contextSpyData);
@@ -49,7 +49,7 @@ export interface RendererMainFpsUpdateEvent {
  * @category Events
  * @example
  * ```typescript
- * renderer.on('frameTick', (data) => {
+ * renderer.on('frameTick', (_target, data) => {
  *   console.log(`Frame time: ${data.time}ms, delta: ${data.delta}ms`);
  * });
  * ```
@@ -67,7 +67,7 @@ export interface RendererMainFrameTickEvent {
  * @category Events
  * @example
  * ```typescript
- * renderer.on('renderUpdate', (data) => {
+ * renderer.on('renderUpdate', (_target, data) => {
  *   console.log(`Rendered quads: ${data.quads}, renderOps: ${data.renderOps}`);
  * });
  * ```
@@ -110,7 +110,7 @@ export interface RendererMainIdleEvent {
  * @category Events
  * @example
  * ```typescript
- * renderer.on('criticalCleanup', (data) => {
+ * renderer.on('criticalCleanup', (_target, data) => {
  *   console.log(`Memory cleanup triggered!`);
  *   console.log(`Memory used: ${data.memUsed} bytes`);
  *   console.log(`Critical threshold: ${data.criticalThreshold} bytes`);
@@ -130,7 +130,7 @@ export interface RendererMainCriticalCleanupEvent {
  * @category Events
  * @example
  * ```typescript
- * renderer.on('criticalCleanupFailed', (data) => {
+ * renderer.on('criticalCleanupFailed', (_target, data) => {
  *   console.warn(`Memory cleanup failed!`);
  *   console.log(`Memory still used: ${data.memUsed} bytes`);
  *   console.log(`Critical threshold: ${data.criticalThreshold} bytes`);
@@ -165,6 +165,90 @@ export interface RendererMainCriticalCleanupFailedEvent {
 export interface RendererMainContextLostEvent {
   /** This event has no payload - listen without parameters */
   readonly __eventHasNoPayload?: never;
+}
+
+/**
+ * GPU Out Of Memory Event Data
+ *
+ * @remarks
+ * Fired when the renderer detects a real `GL_OUT_OF_MEMORY` from the GPU (probed
+ * once per frame). This is the only certain signal that the texture memory
+ * estimate has overshot the device's real VRAM budget. At this point a texture
+ * upload has already failed and the driver may soon drop the WebGL context, so
+ * the supported recovery is for the application to reload with a lower
+ * `criticalThreshold`.
+ *
+ * `memUsed` is the estimated texture memory in use at the moment of the failure.
+ * Because the upload failed, the real GPU budget is at or below this value — so
+ * it is a good basis for the next `criticalThreshold`.
+ *
+ * The renderer deliberately does NOT persist, reload, or change the threshold
+ * itself — that is application policy. The recommended integration is to lower
+ * the threshold, persist it, and reload:
+ *
+ * @category Events
+ * @example
+ * ```typescript
+ * // --- on startup: read the calibrated threshold before creating the renderer
+ * //
+ * // Namespace the storage key per app. On TV devices that run from the
+ * // filesystem (file://) the origin is null/opaque, so a bare key can collide
+ * // across apps — including the path keeps each app's calibration separate.
+ * const STORAGE_KEY = `myapp:criticalThreshold:${location.pathname}`;
+ *
+ * // Never let calibration drive the threshold so low the UX breaks. Pick a
+ * // floor that matches your app (here, 70% of the default budget).
+ * const DEFAULT_CRITICAL = 200e6;
+ * const MIN_THRESHOLD = Math.round(DEFAULT_CRITICAL * 0.7);
+ *
+ * function readCriticalThreshold(): number {
+ *   const raw =
+ *     typeof localStorage !== 'undefined'
+ *       ? localStorage.getItem(STORAGE_KEY)
+ *       : null;
+ *   const stored = raw !== null ? parseInt(raw, 10) : NaN;
+ *   if (Number.isNaN(stored) === false && stored > 0) {
+ *     return Math.max(stored, MIN_THRESHOLD);
+ *   }
+ *   return DEFAULT_CRITICAL;
+ * }
+ *
+ * const renderer = new RendererMain(
+ *   { textureMemory: { criticalThreshold: readCriticalThreshold() } },
+ *   'app',
+ * );
+ *
+ * // --- at runtime: react to a real GPU out-of-memory
+ * let handlingOOM = false;
+ * renderer.on('outOfMemory', (_target, { memUsed, criticalThreshold }) => {
+ *   if (handlingOOM === true) {
+ *     return; // debounce — several uploads can fail in the same burst
+ *   }
+ *   handlingOOM = true;
+ *
+ *   // The OOM proves the real budget is <= memUsed. Drop to 90% of the lower
+ *   // of (estimate, current threshold), but never below the floor.
+ *   const ceiling = Math.min(memUsed, criticalThreshold);
+ *   const next = Math.max(Math.round(ceiling * 0.9), MIN_THRESHOLD);
+ *
+ *   try {
+ *     localStorage.setItem(STORAGE_KEY, String(next));
+ *   } catch (e) {
+ *     // storage may be blocked (e.g. file:// with storage disabled); the new
+ *     // value just won't survive the reload.
+ *   }
+ *
+ *   // Reload so the renderer reinitializes with the lower budget. The engine
+ *   // does not rebuild GPU resources in place, so reload is the clean recovery.
+ *   location.reload();
+ * });
+ * ```
+ */
+export interface RendererMainOutOfMemoryEvent {
+  /** Estimated texture memory in use at the time of the failure (bytes) */
+  memUsed: number;
+  /** Critical threshold in effect at the time of the failure (bytes) */
+  criticalThreshold: number;
 }
 
 /**
@@ -532,11 +616,11 @@ export type RendererMainSettings = RendererRuntimeSettings & {
  *
  * Listen to events using the standard EventEmitter API:
  * ```typescript
- * renderer.on('fpsUpdate', (data: RendererMainFpsUpdateEvent) => {
+ * renderer.on('fpsUpdate', (_target, data: RendererMainFpsUpdateEvent) => {
  *   console.log(`FPS: ${data.fps}`);
  * });
  *
- * renderer.on('idle', (data: RendererMainIdleEvent) => {
+ * renderer.on('idle', () => {
  *   // Renderer is idle - no scene changes
  * });
  * ```
@@ -548,6 +632,7 @@ export type RendererMainSettings = RendererRuntimeSettings & {
  * @see {@link RendererMainCriticalCleanupEvent}
  * @see {@link RendererMainCriticalCleanupFailedEvent}
  * @see {@link RendererMainContextLostEvent}
+ * @see {@link RendererMainOutOfMemoryEvent}
  *
  * @fires RendererMain#fpsUpdate
  * @fires RendererMain#frameTick
@@ -556,6 +641,7 @@ export type RendererMainSettings = RendererRuntimeSettings & {
  * @fires RendererMain#criticalCleanup
  * @fires RendererMain#criticalCleanupFailed
  * @fires RendererMain#contextLost
+ * @fires RendererMain#outOfMemory
  */
 export class RendererMain extends EventEmitter {
   readonly root: INode;
@@ -717,11 +803,13 @@ export class RendererMain extends EventEmitter {
     const currentTxSettings =
       (this.stage && this.stage.options.textureMemory) || {};
 
+    const criticalThreshold =
+      textureMemory?.criticalThreshold ??
+      currentTxSettings?.criticalThreshold ??
+      200e6;
+
     return {
-      criticalThreshold:
-        textureMemory?.criticalThreshold ??
-        currentTxSettings?.criticalThreshold ??
-        200e6,
+      criticalThreshold,
       targetThresholdLevel:
         textureMemory?.targetThresholdLevel ??
         currentTxSettings?.targetThresholdLevel ??

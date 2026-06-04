@@ -67,4 +67,16 @@ export abstract class CoreRenderer {
    * on the next render call.
    */
   invalidateQuadBuffer?(): void;
+
+  /**
+   * Probe the backend for a GPU out-of-memory condition since the last call.
+   * Returns `true` when an out-of-memory was seen. Backends that cannot detect
+   * this (e.g. Canvas2D) return `false`.
+   *
+   * @remarks
+   * Called once per frame by the Stage. Backends where the probe is expensive
+   * (a CPU/GPU sync, e.g. WebGL `gl.getError()`) rely on this once-per-frame
+   * cadence rather than checking per draw/upload.
+   */
+  abstract checkForOutOfMemory(): boolean;
 }
