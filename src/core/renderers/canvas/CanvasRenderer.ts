@@ -264,6 +264,11 @@ export class CanvasRenderer extends CoreRenderer {
     return null;
   }
 
+  // Canvas2D has no GPU out-of-memory signal to probe.
+  checkForOutOfMemory(): boolean {
+    return false;
+  }
+
   /**
    * Updates the clear color of the canvas renderer.
    *

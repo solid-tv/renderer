@@ -77,6 +77,14 @@ export class WebPlatform extends Platform {
         setTimeout(requestLoop, Math.max(targetFrameTime, 15));
 
         if (isIdle === false) {
+          // The render burst has settled. Probe for a GPU out-of-memory now
+          // rather than every frame: GL errors accumulate and persist until
+          // drained, so a single check here still catches any OOM raised during
+          // the active frames, without paying the getError() CPU/GPU sync on
+          // every frame. Queues the `outOfMemory` event, flushed below.
+          if (stage.renderer.checkForOutOfMemory() === true) {
+            stage.txMemManager.handleOutOfMemory();
+          }
           stage.shManager.cleanup();
           stage.eventBus.emit('idle');
           isIdle = true;

@@ -42,6 +42,15 @@ import type { Dimensions } from '../../../common/CommonTypes.js';
 
 export type WebGlRendererOptions = CoreRendererOptions;
 
+const GL_OUT_OF_MEMORY = 0x0505;
+
+/**
+ * Upper bound on how many queued GL errors we drain per frame in
+ * {@link WebGlRenderer.checkForOutOfMemory}. Keeps the per-frame `getError()`
+ * sync cost fixed even if the error queue is unexpectedly deep.
+ */
+const MAX_DRAINED_GL_ERRORS = 8;
+
 interface CoreWebGlSystem {
   parameters: CoreWebGlParameters;
   extensions: CoreWebGlExtensions;
@@ -1281,6 +1290,33 @@ export class WebGlRenderer extends CoreRenderer {
       totalUsed: this.quadBufferUsage,
     };
     return bufferInfo;
+  }
+
+  /**
+   * Drain the GL error queue once and report whether a GL_OUT_OF_MEMORY was
+   * seen since the last call.
+   *
+   * @remarks
+   * `gl.getError()` forces a CPU↔GPU sync, so this is deliberately invoked at
+   * most once per frame by the Stage rather than after each texture upload.
+   * `getError()` returns one error at a time, so we drain a bounded number of
+   * queued errors to ensure a non-OOM error ahead of the OOM doesn't mask it
+   * for this frame. Non-OOM errors are ignored here (the renderer otherwise
+   * only inspects them in development builds).
+   */
+  override checkForOutOfMemory(): boolean {
+    const glw = this.glw;
+    let outOfMemory = false;
+    for (let i = 0; i < MAX_DRAINED_GL_ERRORS; i++) {
+      const error = glw.getError();
+      if (error === 0) {
+        break;
+      }
+      if (error === GL_OUT_OF_MEMORY) {
+        outOfMemory = true;
+      }
+    }
+    return outOfMemory;
   }
 
   getDefaultShaderNode(): WebGlShaderNode {
