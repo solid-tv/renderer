@@ -394,6 +394,26 @@ export interface RendererRuntimeSettings {
  */
 export type RendererMainSettings = RendererRuntimeSettings & {
   /**
+   * Maximum number of entries kept in the SDF text layout cache
+   *
+   * @remarks
+   * The SDF text renderer caches the computed glyph layout for a given
+   * `text` + font + layout-prop combination so that identical strings (e.g.
+   * repeated badges/labels) are not re-laid-out. The cache is content-keyed
+   * and shared across nodes, and is trimmed down to this many (most recently
+   * used) entries whenever the stage goes idle.
+   *
+   * Set this higher for content-dense UIs with many simultaneous unique
+   * strings, or lower to cap memory more aggressively. Strings longer than
+   * the renderer's internal length threshold are never cached regardless of
+   * this value, since long unique strings (e.g. descriptions) have a near-zero
+   * cache hit rate.
+   *
+   * @defaultValue `250`
+   */
+  textLayoutCacheSize: number;
+
+  /**
    * Include context call (i.e. WebGL) information in FPS updates
    *
    * @remarks
@@ -678,6 +698,7 @@ export class RendererMain extends EventEmitter {
       fpsUpdateInterval: settings.fpsUpdateInterval || 0,
       enableClear: settings.enableClear ?? true,
       targetFPS: settings.targetFPS || 0,
+      textLayoutCacheSize: settings.textLayoutCacheSize ?? 250,
       numImageWorkers:
         settings.numImageWorkers !== undefined ? settings.numImageWorkers : 2,
       enableContextSpy: settings.enableContextSpy ?? false,
@@ -755,6 +776,7 @@ export class RendererMain extends EventEmitter {
       textBaselineMode: settings.textBaselineMode!,
       inspector: settings.inspector !== null,
       targetFPS: settings.targetFPS!,
+      textLayoutCacheSize: settings.textLayoutCacheSize!,
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit!,
       createImageBitmapSupport: settings.createImageBitmapSupport!,
       premultiplyAlphaHonored: settings.premultiplyAlphaHonored,
