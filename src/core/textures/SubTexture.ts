@@ -133,6 +133,19 @@ export class SubTexture extends Texture {
     this.parentTexture.setRenderableOwner(this.subtextureId, isRenderable);
   }
 
+  override destroy(): void {
+    // Detach from the parent texture's event emitter. The parent is typically a
+    // long-lived shared atlas (preventCleanup), so without this each destroyed
+    // SubTexture — and everything its handlers capture — would be retained by
+    // the parent's listener lists for the rest of the session.
+    const parentTx = this.parentTexture;
+    parentTx.off('loading', this.onParentTxLoading);
+    parentTx.off('loaded', this.onParentTxLoaded);
+    parentTx.off('failed', this.onParentTxFailed);
+    parentTx.off('freed', this.onParentTxFreed);
+    super.destroy();
+  }
+
   override async getTextureSource(): Promise<TextureData> {
     // Check if parent texture is loaded
     return new Promise((resolve, reject) => {

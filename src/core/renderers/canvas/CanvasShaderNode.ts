@@ -26,7 +26,6 @@ export class CanvasShaderNode<
 > extends CoreShaderNode<Props> {
   private updater: ((node: CoreNode, props?: Props) => void) | undefined =
     undefined;
-  private valueKey: string = '';
   computed: Partial<Computed> = {};
   applySNR: boolean;
   render: CanvasShaderType<Props>['render'];

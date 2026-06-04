@@ -53,7 +53,6 @@ export class WebGlShaderNode<
   readonly program: WebGlShaderProgram;
   private updater: ((node: CoreNode, props?: Props) => void) | undefined =
     undefined;
-  private valueKey: string = '';
   uniforms: UniformCollection = {
     single: {},
     vec2: {},

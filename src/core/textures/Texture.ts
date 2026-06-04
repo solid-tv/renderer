@@ -370,6 +370,10 @@ export abstract class Texture extends EventEmitter {
 
     // Always free texture data regardless of state
     this.freeTextureData();
+
+    // Drop any remaining subscribers so a texture destroyed while something
+    // still holds a listener does not retain it (and its captures).
+    this.removeAllListeners();
   }
 
   /**
