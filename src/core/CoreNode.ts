@@ -689,12 +689,6 @@ export interface CoreNodeProps {
    */
   srcY?: number;
   /**
-   * Mark the node as interactive so we can perform hit tests on it
-   * when pointer events are registered.
-   * @default false
-   */
-  interactive?: boolean;
-  /**
    * preventDestroy flag prevents the node and its children from being destroyed
    * when the parent is destroyed.
    * @default false
@@ -882,8 +876,7 @@ export class CoreNode extends EventEmitter {
     // creates a fresh object with a consistent shape.  Save fields that are
     // re-applied through setters, then null them on props so the setters
     // detect the change.
-    const { texture, shader, src, rtt, boundsMargin, interactive, parent } =
-      props;
+    const { texture, shader, src, rtt, boundsMargin, parent } = props;
     const p = (this.props = props);
     p.texture = null;
     p.shader = null;
@@ -939,9 +932,6 @@ export class CoreNode extends EventEmitter {
     }
     if (boundsMargin !== null) {
       this.boundsMargin = boundsMargin;
-    }
-    if (interactive !== undefined) {
-      this.interactive = interactive;
     }
 
     // Initialize autosize if enabled
@@ -2963,18 +2953,6 @@ export class CoreNode extends EventEmitter {
 
   get textureOptions(): TextureOptions {
     return this.props.textureOptions;
-  }
-
-  set interactive(value: boolean | undefined) {
-    this.props.interactive = value;
-    // Update Stage's interactive Set
-    if (value === true) {
-      this.stage.interactiveNodes.add(this);
-    }
-  }
-
-  get interactive(): boolean | undefined {
-    return this.props.interactive;
   }
 
   get componentName(): string | undefined {

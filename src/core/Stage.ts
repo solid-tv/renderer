@@ -37,7 +37,6 @@ import {
 import { CoreRenderer } from './renderers/CoreRenderer.js';
 import { CoreTextNode, type CoreTextNodeProps } from './CoreTextNode.js';
 import { santizeCustomDataMap } from '../main-api/utils.js';
-import { pointInBound } from './lib/utils.js';
 import type { CoreShaderNode } from './renderers/CoreShaderNode.js';
 import { Matrix3d } from './lib/Matrix3d.js';
 import { createBound, createPreloadBounds, type Bound } from './lib/utils.js';
@@ -71,11 +70,6 @@ export type StageFrameTickHandler = (
   frameTickData: FrameTickPayload,
 ) => void;
 
-export interface Point {
-  x: number;
-  y: number;
-}
-
 const autoStart = true;
 
 export class Stage {
@@ -88,7 +82,6 @@ export class Stage {
   public readonly shManager: CoreShaderManager;
   public readonly renderer: CoreRenderer;
   public readonly root: CoreNode;
-  public readonly interactiveNodes: Set<CoreNode> = new Set();
   public boundsMargin: [number, number, number, number];
   public readonly defShaderNode: CoreShaderNode | null = null;
   public strictBound: Bound;
@@ -897,45 +890,6 @@ export class Stage {
     this.root.childUpdateType |= UpdateType.RenderBounds;
   }
 
-  /** Find all nodes at a given point
-   * @param data
-   */
-  findNodesAtPoint(data: Point): CoreNode[] {
-    const x = data.x / this.options.deviceLogicalPixelRatio;
-    const y = data.y / this.options.deviceLogicalPixelRatio;
-    const nodes: CoreNode[] = [];
-    for (const node of this.interactiveNodes) {
-      if (node.isRenderable === false) {
-        continue;
-      }
-      if (pointInBound(x, y, node.renderBound!) === true) {
-        nodes.push(node);
-      }
-    }
-    return nodes;
-  }
-
-  /**
-   * Find the top node at a given point
-   * @param data
-   * @returns
-   */
-  getNodeFromPosition(data: Point): CoreNode | null {
-    const nodes: CoreNode[] = this.findNodesAtPoint(data);
-    if (nodes.length === 0) {
-      return null;
-    }
-
-    //get last node in array (as top node)
-    let topNode = nodes[nodes.length - 1] as CoreNode;
-    for (let i = 0; i < nodes.length; i++) {
-      if (nodes[i]!.zIndex > topNode.zIndex) {
-        topNode = nodes[i]!;
-      }
-    }
-    return topNode || null;
-  }
-
   /**
    * add node to timeNodes arrays
    * @param node
@@ -1062,7 +1016,6 @@ export class Stage {
       rtt: props.rtt ?? false,
       data,
       imageType: props.imageType,
-      interactive: props.interactive ?? false,
       preventDestroy: props.preventDestroy,
       componentName: props.componentName,
       componentLocation: props.componentLocation,
