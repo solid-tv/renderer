@@ -131,8 +131,12 @@ export class CanvasTexture extends CoreContextTexture {
   }
 
   private async onLoadRequest(
-    data: NonNullable<NonNullable<Texture['textureData']>['data']>,
+    data: NonNullable<Texture['textureData']>['data'],
   ): Promise<Dimensions> {
+    if (data === null) {
+      throw new Error('CanvasTexture: Texture data is null');
+    }
+
     // CompressedData objects (KTX, PVR, ASTC) carry GPU-format mipmap buffers
     // that cannot be decoded by Canvas2D. Reject explicitly rather than falling
     // through silently and leaving this.image unassigned.
