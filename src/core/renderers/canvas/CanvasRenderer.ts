@@ -146,9 +146,20 @@ export class CanvasRenderer extends CoreRenderer {
         image = (texture.ctxTexture as CanvasTexture).getImage(tintColor);
       }
 
-      // getImage returns null when the underlying image was freed mid-load;
-      // skip drawing this frame rather than crashing.
-      if (image === null) {
+      // The texture can disappear while an async load/fetch is racing (e.g. 404);
+      // skip drawing this frame instead of dereferencing an invalid image object.
+      if (image === null || image === undefined) {
+        return;
+      }
+
+      const imageWidth = image.width;
+      const imageHeight = image.height;
+      if (
+        typeof imageWidth !== 'number' ||
+        typeof imageHeight !== 'number' ||
+        imageWidth <= 0 ||
+        imageHeight <= 0
+      ) {
         return;
       }
 
@@ -156,8 +167,8 @@ export class CanvasRenderer extends CoreRenderer {
 
       const txCoords = node.textureCoords;
       if (txCoords) {
-        const ix = image.width;
-        const iy = image.height;
+        const ix = imageWidth;
+        const iy = imageHeight;
 
         let sx = txCoords.x1 * ix;
         let sy = txCoords.y1 * iy;
