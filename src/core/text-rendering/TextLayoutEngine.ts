@@ -44,6 +44,23 @@ type WrapStrategyFn = (
 const CAP_HEIGHT_FALLBACK_RATIO = 0.7;
 const X_HEIGHT_FALLBACK_RATIO = 0.5;
 
+/**
+ * Resolve the effective horizontal alignment for the layout direction.
+ * In RTL, `left` and `right` are swapped; `center` is unchanged.
+ */
+export const resolveTextAlign = (textAlign: string, rtl: boolean): string => {
+  if (rtl === false) {
+    return textAlign;
+  }
+  if (textAlign === 'left') {
+    return 'right';
+  }
+  if (textAlign === 'right') {
+    return 'left';
+  }
+  return textAlign;
+};
+
 export const normalizeFontMetrics = (
   metrics: FontMetrics,
   fontSize: number,

@@ -23,6 +23,7 @@ import type { RectWithValid } from './lib/utils.js';
 import type { CoreRenderer } from './renderers/CoreRenderer.js';
 import type { TextureLoadedEventHandler } from './textures/Texture.js';
 import { Matrix3d } from './lib/Matrix3d.js';
+import { resolveTextAlign } from './text-rendering/TextLayoutEngine.js';
 export interface CoreTextNodeProps extends CoreNodeProps, TrProps {
   /**
    * Force Text Node to use a specific Text Renderer
@@ -126,7 +127,8 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
     let mountTranslateY = p.mountY * h;
 
     const tProps = this.textProps;
-    const { textAlign, verticalAlign, maxWidth, maxHeight } = tProps;
+    const { verticalAlign, maxWidth, maxHeight } = tProps;
+    const textAlign = resolveTextAlign(tProps.textAlign, this._rtl);
     const contain = this._containType;
 
     const hasMaxWidth = maxWidth > 0;
@@ -192,10 +194,29 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
     }
   }
 
+  protected override onDirectionChanged(rtl: boolean): void {
+    // Text alignment (left/right) is mirrored under RTL, so the layout must be
+    // regenerated with the new effective alignment.
+    this.textProps.rtl = rtl;
+    this._layoutGenerated = false;
+    this._cachedLayout = null;
+  }
+
   /**
    * Override CoreNode's update method to handle text-specific updates
    */
   override update(delta: number, parentClippingRect: RectWithValid): void {
+    // Resolve layout direction up-front (CoreNode.update would otherwise do it
+    // after the text generation below), so the layout is regenerated with the
+    // correct alignment in the same frame instead of flashing for one frame.
+    if (this.updateType & UpdateType.Direction) {
+      if (this.resolveDirection() === true) {
+        this.updateType |= UpdateType.Local | UpdateType.Children;
+        this.childUpdateType |= UpdateType.Direction;
+      }
+      this.updateType &= ~UpdateType.Direction;
+    }
+
     if (
       (this.textProps.forceLoad === true ||
         this.allowTextGeneration() === true) &&
