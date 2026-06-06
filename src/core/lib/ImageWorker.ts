@@ -177,20 +177,27 @@ export class ImageWorkerManager {
   workers: Worker[] = [];
   workerLoad: number[] = [];
   nextId = 0;
+  /** Upper bound on the pool size, from the `numImageWorkers` setting. */
+  private readonly maxWorkers: number;
+  /**
+   * Shared worker source blob, retained so additional workers can be spawned
+   * one at a time without re-serializing. Released once the pool reaches
+   * `maxWorkers`, since no further workers will ever be created.
+   */
+  private workerBlob: Blob | null = null;
 
   constructor(
     numImageWorkers: number,
     createImageBitmapSupport: CreateImageBitmapSupport,
   ) {
-    this.workers = this.createWorkers(
-      numImageWorkers,
-      createImageBitmapSupport,
-    );
-    this.workers.forEach((worker, index) => {
-      worker.onmessage = (event) => this.handleMessage(event, index);
-      worker.onerror = (event) => this.handleWorkerError(event, index);
-      worker.onmessageerror = (event) => this.handleWorkerError(event, index);
-    });
+    this.maxWorkers = numImageWorkers;
+    // Build the shared worker source once, then spawn workers one at a time:
+    // the first eagerly so the image pipeline is live immediately, the rest on
+    // demand as concurrent load grows (see getImage). This keeps all N worker
+    // threads from spinning up and parsing the blob simultaneously during the
+    // first-paint window on constrained devices.
+    this.workerBlob = this.createWorkerBlob(createImageBitmapSupport);
+    this.spawnWorker();
   }
 
   private handleMessage(event: MessageEvent, workerIndex: number) {
@@ -231,10 +238,9 @@ export class ImageWorkerManager {
     this.workerLoad[workerIndex] = 0;
   }
 
-  private createWorkers(
-    numWorkers = 1,
+  private createWorkerBlob(
     createImageBitmapSupport: CreateImageBitmapSupport,
-  ): Worker[] {
+  ): Blob {
     let workerCode = `(${createImageWorker.toString()})()`;
 
     // Replace placeholders with actual initialization values
@@ -265,19 +271,39 @@ export class ImageWorkerManager {
     }
 
     workerCode = workerCode.replace('"use strict";', '');
-    const blob: Blob = new Blob([workerCode], {
+    return new Blob([workerCode], {
       type: 'application/javascript',
     });
-    const urlFactory = self.URL ? URL : webkitURL;
-    const blobURL: string = urlFactory.createObjectURL(blob);
-    const workers: Worker[] = [];
-    for (let i = 0; i < numWorkers; i++) {
-      workers.push(new Worker(blobURL));
-      this.workerLoad.push(0);
+  }
+
+  /**
+   * Spawn a single worker from the shared blob and wire up its handlers.
+   * No-op once the pool has reached `maxWorkers`.
+   */
+  private spawnWorker(): void {
+    if (this.workerBlob === null || this.workers.length >= this.maxWorkers) {
+      return;
     }
-    // Workers retain the script; the URL itself is no longer needed.
+
+    const index = this.workers.length;
+    const urlFactory = self.URL ? URL : webkitURL;
+    const blobURL: string = urlFactory.createObjectURL(this.workerBlob);
+    const worker = new Worker(blobURL);
+    // The worker retains the script after construction; the URL is no longer
+    // needed once the Worker has been created from it.
     urlFactory.revokeObjectURL(blobURL);
-    return workers;
+
+    worker.onmessage = (event) => this.handleMessage(event, index);
+    worker.onerror = (event) => this.handleWorkerError(event, index);
+    worker.onmessageerror = (event) => this.handleWorkerError(event, index);
+
+    this.workers.push(worker);
+    this.workerLoad.push(0);
+
+    // Pool is full — the blob will never be needed again, so release it.
+    if (this.workers.length >= this.maxWorkers) {
+      this.workerBlob = null;
+    }
   }
 
   private getNextWorkerIndex(): number {
@@ -311,7 +337,19 @@ export class ImageWorkerManager {
   ): Promise<TextureData> {
     return new Promise((resolve, reject) => {
       try {
-        const nextWorkerIndex = this.getNextWorkerIndex();
+        // Grow the pool one worker at a time: only when the least-loaded worker
+        // is already busy and we're still under the cap. This spreads worker
+        // creation across real demand instead of a single boot-time burst.
+        let nextWorkerIndex = this.getNextWorkerIndex();
+        if (
+          nextWorkerIndex !== -1 &&
+          this.workerLoad[nextWorkerIndex]! > 0 &&
+          this.workers.length < this.maxWorkers
+        ) {
+          this.spawnWorker();
+          nextWorkerIndex = this.workers.length - 1;
+        }
+
         if (nextWorkerIndex === -1) {
           reject(new Error('No image workers available'));
           return;
