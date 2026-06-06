@@ -1195,11 +1195,17 @@ export class Inspector {
       // value is the parent CoreNode. Its mirror div is stored on the node
       // itself (see createNode/createTextNode), so use that reference instead
       // of a document-global getElementById — the latter collides across
-      // multiple renderer/inspector instances sharing one document. The stage
-      // root node has no mirror div, so a missing div means "attach to the
-      // inspector root" (this also replaces the fragile parentId === 1 check).
+      // multiple renderer/inspector instances sharing one document.
+      //
+      // The stage root (the only node with parent === null) is mirrored by
+      // `this.root`, the container that is actually attached to the document.
+      // createNodes() also makes a plain div for the root node, but that div is
+      // never attached, so the root's direct children must be parented to
+      // `this.root` instead — otherwise the whole mirror tree ends up detached
+      // from the document. This replaces the old `parentId === 1` heuristic.
+      const parentNode = value as CoreNode & { div?: HTMLElement };
       const parentDiv =
-        (value as CoreNode & { div?: HTMLElement }).div ?? this.root;
+        parentNode.parent === null ? this.root : parentNode.div ?? this.root;
       parentDiv.appendChild(div);
       return;
     }
