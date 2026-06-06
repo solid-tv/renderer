@@ -94,10 +94,6 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
       containerNode.x += 100;
     }
 
-    if (e.key === ' ') {
-      containerNode.strictBounds = !containerNode.strictBounds;
-    }
-
     if (e.key === 'ArrowUp') {
       curPage = Math.min(3, curPage + 1);
       page(curPage);
