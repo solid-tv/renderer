@@ -21,11 +21,11 @@ export type ShaderSource<T> =
 export type WebGlShaderType<T extends object = Record<string, unknown>> =
   CoreShaderType<T> & {
     /**
-     * fragment shader source for WebGl or WebGl2
+     * fragment shader source for WebGl
      */
     fragment: ShaderSource<T>;
     /**
-     * vertex shader source for WebGl or WebGl2
+     * vertex shader source for WebGl
      */
     vertex?: ShaderSource<T>;
     /**
@@ -43,7 +43,6 @@ export type WebGlShaderType<T extends object = Record<string, unknown>> =
      * extensions required for specific shader?
      */
     webgl1Extensions?: string[];
-    webgl2Extensions?: string[];
     supportsIndexedTextures?: boolean;
   };
 

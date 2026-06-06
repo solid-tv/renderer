@@ -85,7 +85,6 @@ export interface ShaderOptions {
   shaderSources?: ShaderProgramSources;
   supportsIndexedTextures?: boolean;
   webgl1Extensions?: string[];
-  webgl2Extensions?: string[];
 }
 
 // prettier-ignore
