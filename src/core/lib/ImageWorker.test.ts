@@ -57,52 +57,43 @@ afterEach(() => {
 const load = (mgr: ImageWorkerManager) =>
   void mgr.getImage('img.png', null, null, null, null, null);
 
-describe('ImageWorkerManager staggered spawning', () => {
-  it('spawns exactly one worker eagerly at construction', () => {
+describe('ImageWorkerManager pool spawning', () => {
+  it('does not spawn any workers at construction', () => {
     new ImageWorkerManager(3, support);
-    expect(FakeWorker.instances.length).toBe(1);
+    // Spawning is lazy — nothing happens until the first image request.
+    expect(FakeWorker.instances.length).toBe(0);
   });
 
-  it('does not grow while the existing worker is idle', () => {
+  it('spawns the whole pool at once on the first image request', () => {
     const mgr = new ImageWorkerManager(3, support);
-    // First request lands on the idle eager worker — no growth.
-    load(mgr);
-    expect(FakeWorker.instances.length).toBe(1);
-  });
-
-  it('grows one worker at a time under concurrent load, up to the cap', () => {
-    const mgr = new ImageWorkerManager(3, support);
-
-    load(mgr); // -> worker 0 (idle), load[0]=1, still 1 worker
-    expect(FakeWorker.instances.length).toBe(1);
-
-    load(mgr); // all busy, under cap -> spawn worker 1
-    expect(FakeWorker.instances.length).toBe(2);
-
-    load(mgr); // all busy, under cap -> spawn worker 2
-    expect(FakeWorker.instances.length).toBe(3);
-
-    load(mgr); // all busy but at cap -> no growth
     load(mgr);
     expect(FakeWorker.instances.length).toBe(3);
   });
 
-  it('never spawns more than one worker when maxWorkers is 1', () => {
+  it('does not respawn the pool on subsequent requests', () => {
+    const mgr = new ImageWorkerManager(3, support);
+    load(mgr); // spawns the pool
+    expect(FakeWorker.instances.length).toBe(3);
+    // Subsequent requests reuse the existing pool — no new workers.
+    load(mgr);
+    load(mgr);
+    load(mgr);
+    expect(FakeWorker.instances.length).toBe(3);
+  });
+
+  it('spawns exactly maxWorkers when that is 1', () => {
     const mgr = new ImageWorkerManager(1, support);
-    expect(FakeWorker.instances.length).toBe(1);
     load(mgr);
+    expect(FakeWorker.instances.length).toBe(1);
     load(mgr);
     load(mgr);
     expect(FakeWorker.instances.length).toBe(1);
   });
 
-  it('serializes the worker source only once, reusing the blob per spawn', () => {
+  it('serializes the worker source once, reusing the blob per worker', () => {
     const mgr = new ImageWorkerManager(3, support);
-    // Drive growth to the cap.
     load(mgr);
-    load(mgr);
-    load(mgr);
-    // One object URL created+revoked per spawned worker (3), not per request.
+    // One object URL created+revoked per spawned worker (3), serialized once.
     expect(createObjectURL).toHaveBeenCalledTimes(3);
     expect(revokeObjectURL).toHaveBeenCalledTimes(3);
   });

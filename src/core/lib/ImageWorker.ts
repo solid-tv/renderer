@@ -179,25 +179,30 @@ export class ImageWorkerManager {
   nextId = 0;
   /** Upper bound on the pool size, from the `numImageWorkers` setting. */
   private readonly maxWorkers: number;
-  /**
-   * Shared worker source blob, retained so additional workers can be spawned
-   * one at a time without re-serializing. Released once the pool reaches
-   * `maxWorkers`, since no further workers will ever be created.
-   */
+  /** Retained so the worker source is serialized once, when the pool spawns. */
   private workerBlob: Blob | null = null;
+  private readonly createImageBitmapSupport: CreateImageBitmapSupport;
 
   constructor(
     numImageWorkers: number,
     createImageBitmapSupport: CreateImageBitmapSupport,
   ) {
     this.maxWorkers = numImageWorkers;
-    // Build the shared worker source once, then spawn workers one at a time:
-    // the first eagerly so the image pipeline is live immediately, the rest on
-    // demand as concurrent load grows (see getImage). This keeps all N worker
-    // threads from spinning up and parsing the blob simultaneously during the
-    // first-paint window on constrained devices.
-    this.workerBlob = this.createWorkerBlob(createImageBitmapSupport);
-    this.spawnWorker();
+    this.createImageBitmapSupport = createImageBitmapSupport;
+  }
+
+  /**
+   * Build the shared worker source once and spawn the full pool in a single
+   * burst. Called lazily on the first image request. No-op once spawned.
+   */
+  private spawnWorkers(): void {
+    if (this.workers.length > 0) {
+      return;
+    }
+    this.workerBlob = this.createWorkerBlob(this.createImageBitmapSupport);
+    for (let i = 0; i < this.maxWorkers; i++) {
+      this.spawnWorker();
+    }
   }
 
   private handleMessage(event: MessageEvent, workerIndex: number) {
@@ -337,17 +342,12 @@ export class ImageWorkerManager {
   ): Promise<TextureData> {
     return new Promise((resolve, reject) => {
       try {
-        // Grow the pool one worker at a time: only when the least-loaded worker
-        // is already busy and we're still under the cap. This spreads worker
-        // creation across real demand instead of a single boot-time burst.
         let nextWorkerIndex = this.getNextWorkerIndex();
-        if (
-          nextWorkerIndex !== -1 &&
-          this.workerLoad[nextWorkerIndex]! > 0 &&
-          this.workers.length < this.maxWorkers
-        ) {
-          this.spawnWorker();
-          nextWorkerIndex = this.workers.length - 1;
+        if (nextWorkerIndex === -1) {
+          // Pool not spawned yet — spin up all workers at once on the first
+          // image request, off the boot/first-render critical path.
+          this.spawnWorkers();
+          nextWorkerIndex = this.getNextWorkerIndex();
         }
 
         if (nextWorkerIndex === -1) {
