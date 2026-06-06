@@ -515,17 +515,6 @@ export type RendererMainSettings = RendererRuntimeSettings & {
   textBaselineMode: TextBaselineMode;
 
   /**
-   * Force WebGL2
-   *
-   * @remarks
-   * Force the renderer to use WebGL2. This can be used to force the renderer to
-   * use WebGL2 even if the browser supports WebGL1.
-   *
-   * @defaultValue `false`
-   */
-  forceWebGL2: boolean;
-
-  /**
    * Canvas object to use for rendering
    *
    * @remarks
@@ -699,7 +688,6 @@ export class RendererMain extends EventEmitter {
       numImageWorkers:
         settings.numImageWorkers !== undefined ? settings.numImageWorkers : 2,
       enableContextSpy: settings.enableContextSpy ?? false,
-      forceWebGL2: settings.forceWebGL2 ?? false,
       inspector: settings.inspector ?? false,
       inspectorOptions: settings.inspectorOptions ?? {},
       renderEngine: settings.renderEngine,
@@ -761,7 +749,6 @@ export class RendererMain extends EventEmitter {
       deviceLogicalPixelRatio,
       devicePhysicalPixelRatio,
       enableContextSpy: settings.enableContextSpy!,
-      forceWebGL2: settings.forceWebGL2!,
       fpsUpdateInterval: settings.fpsUpdateInterval!,
       enableClear: settings.enableClear!,
       numImageWorkers: settings.numImageWorkers!,

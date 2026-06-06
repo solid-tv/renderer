@@ -6,13 +6,12 @@ import type {
   Vec3,
   Vec4,
 } from '../renderers/webgl/internal/ShaderUtils.js';
-import { isWebGl2 } from '../renderers/webgl/internal/WebGlUtils.js';
 
 /**
  * Optimized WebGL Context Wrapper
  *
  * @remarks
- * This class contains the subset of the WebGLRenderingContext & WebGL2RenderingContext
+ * This class contains the subset of the WebGLRenderingContext
  * API that is used by the renderer. Select high volume WebGL methods include
  * caching optimizations to avoid making WebGL calls if the state is already set
  * to the desired value.
@@ -94,7 +93,7 @@ export class WebGlContextWrapper {
   public readonly INVALID_OPERATION: number;
   //#endregion WebGL Enums
 
-  constructor(private gl: WebGLRenderingContext | WebGL2RenderingContext) {
+  constructor(private gl: WebGLRenderingContext) {
     // A freshly created WebGL context is in a fully specified default state.
     // Rather than reading that state back with getParameter/isEnabled — each a
     // synchronous CPU<->GPU round-trip, and previously ~one per texture unit
@@ -172,15 +171,6 @@ export class WebGlContextWrapper {
     this.INVALID_ENUM = gl.INVALID_ENUM;
     this.INVALID_OPERATION = gl.INVALID_OPERATION;
   }
-  /**
-   * Returns true if the WebGL context is WebGL2
-   *
-   * @returns
-   */
-  isWebGl2() {
-    return isWebGl2(this.gl);
-  }
-
   /**
    * ```
    * gl.activeTexture(textureUnit + gl.TEXTURE0);
@@ -1095,33 +1085,6 @@ export class WebGlContextWrapper {
 
   /**
    * ```
-   * gl.createVertexArray();
-   * ```
-   *
-   * @returns
-   */
-  createVertexArray() {
-    if (this.gl instanceof WebGL2RenderingContext) {
-      return this.gl.createVertexArray();
-    }
-    return undefined;
-  }
-
-  /**
-   * ```
-   * gl.bindVertexArray(vertexArray);
-   * ```
-   *
-   * @param vertexArray
-   */
-  bindVertexArray(vertexArray: WebGLVertexArrayObject | null) {
-    if (this.gl instanceof WebGL2RenderingContext) {
-      this.gl.bindVertexArray(vertexArray);
-    }
-  }
-
-  /**
-   * ```
    * gl.getAttribLocation(program, name);
    * ```
    *
@@ -1322,19 +1285,6 @@ export class WebGlContextWrapper {
     // Reset bound buffers if they match the deleted buffer
     if (this.boundArrayBuffer === buffer) {
       this.boundArrayBuffer = null;
-    }
-  }
-
-  /**
-   * ```
-   * gl.deleteVertexArray(vertexArray);
-   * ```
-   *
-   * @param vertexArray - The vertex array object to delete
-   */
-  deleteVertexArray(vertexArray: WebGLVertexArrayObject) {
-    if (this.isWebGl2()) {
-      (this.gl as WebGL2RenderingContext).deleteVertexArray(vertexArray);
     }
   }
 

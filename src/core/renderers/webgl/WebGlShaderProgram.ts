@@ -19,13 +19,6 @@ import { CoreNode } from '../../CoreNode.js';
 
 export class WebGlShaderProgram implements CoreShaderProgram {
   protected program: WebGLProgram | null;
-  /**
-   * Vertex Array Object
-   *
-   * @remarks
-   * Used by WebGL2 Only
-   */
-  protected vao: WebGLVertexArrayObject | undefined;
   protected renderer: WebGlRenderer;
   protected glw: WebGlContextWrapper;
   protected attributeLocations: string[];
@@ -45,22 +38,15 @@ export class WebGlShaderProgram implements CoreShaderProgram {
     this.renderer = renderer;
     const glw = (this.glw = renderer.glw);
 
-    // Check that extensions are supported
-    const webGl2 = glw.isWebGl2();
-    let requiredExtensions: string[] = [];
-
     this.supportsIndexedTextures =
       config.supportsIndexedTextures || this.supportsIndexedTextures;
-    requiredExtensions =
-      (webGl2 && config.webgl2Extensions) ||
-      (!webGl2 && config.webgl1Extensions) ||
-      [];
 
-    const glVersion = webGl2 ? '2.0' : '1.0';
+    // Check that required extensions are supported
+    const requiredExtensions = config.webgl1Extensions || [];
     requiredExtensions.forEach((extensionName) => {
       if (!glw.getExtension(extensionName)) {
         throw new Error(
-          `Shader "${this.constructor.name}" requires extension "${extensionName}" for WebGL ${glVersion} but wasn't found`,
+          `Shader "${this.constructor.name}" requires extension "${extensionName}" for WebGL 1.0 but wasn't found`,
         );
       }
     });
@@ -310,9 +296,6 @@ export class WebGlShaderProgram implements CoreShaderProgram {
       return;
     }
     this.glw.useProgram(this.program, this.uniformLocations!);
-    if (this.glw.isWebGl2() && this.vao) {
-      this.glw.bindVertexArray(this.vao);
-    }
   }
 
   detach(): void {

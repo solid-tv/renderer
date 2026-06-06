@@ -166,7 +166,6 @@ export class Stage {
       appHeight,
       boundsMargin,
       enableContextSpy,
-      forceWebGL2,
       numImageWorkers,
       textureMemory,
       renderEngine,
@@ -237,7 +236,6 @@ export class Stage {
       stage: this,
       canvas,
       contextSpy: this.contextSpy,
-      forceWebGL2,
     });
 
     this.shManager = new CoreShaderManager(this);
