@@ -38,9 +38,27 @@ const init = (stage: Stage): void => {
     maxLayoutCacheSize = configuredCacheSize;
   }
 
-  // Register SDF shader with the shader manager
+  // Register the SDF shader, but defer the (expensive) compile + link until the
+  // first SDF glyph actually renders — see getSdfShader / renderQuads. SDF fonts
+  // load asynchronously, so the first frame almost never needs the shader, and
+  // compiling it during Stage construction sits on the critical path to first
+  // paint for no benefit.
   stage.shManager.registerShaderType('Sdf', Sdf);
-  sdfShader = stage.shManager.createShader('Sdf') as WebGlShaderNode;
+  sdfShader = null;
+};
+
+/**
+ * Lazily compile (and memoize) the SDF shader on first use.
+ *
+ * @remarks
+ * The shader program is compiled and linked the first time an SDF glyph is
+ * actually drawn, not at boot. Subsequent calls return the cached node.
+ */
+const getSdfShader = (stage: Stage): WebGlShaderNode => {
+  if (sdfShader === null) {
+    sdfShader = stage.shManager.createShader('Sdf') as WebGlShaderNode;
+  }
+  return sdfShader;
 };
 
 const font: FontHandler = SdfFontHandler;
@@ -141,6 +159,8 @@ const renderQuads = (
   const webGlRenderer = renderer as WebGlRenderer;
   const cache = renderProps.sdfCache;
   const ctxTexture = atlasTexture.ctxTexture as WebGlCtxTexture;
+  // Compiles on the first real SDF draw; cheap memoized lookup thereafter.
+  const shader = getSdfShader(webGlRenderer.stage);
 
   // --- Cache-hit fast path ------------------------------------------------
   if (cache !== undefined && cache.vertices !== null) {
@@ -167,7 +187,7 @@ const renderQuads = (
         layout.height,
         renderProps.parentHasRenderTexture,
         renderProps.framebufferDimensions,
-        sdfShader!,
+        shader,
       );
       return null;
     }
@@ -189,7 +209,7 @@ const renderQuads = (
     layout.height,
     renderProps.parentHasRenderTexture,
     renderProps.framebufferDimensions,
-    sdfShader!,
+    shader,
   );
 
   // Snapshot the written vertex data into the cache for future frames

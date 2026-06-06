@@ -159,9 +159,16 @@ export class WebGlRenderer extends CoreRenderer {
   constructor(options: WebGlRendererOptions) {
     super(options);
 
+    // CPU-side vertex buffers, reused every frame. Their GL buffers and
+    // BufferCollections are wired up below, once the GL context exists.
     this.quadBuffer = new ArrayBuffer(this.stage.options.quadBufferSize);
     this.fQuadBuffer = new Float32Array(this.quadBuffer);
     this.uiQuadBuffer = new Uint32Array(this.quadBuffer);
+
+    // Shared SDF vertex buffer: 512 KB for ~3600 glyphs.
+    this.sdfBuffer = new ArrayBuffer(512 * 1024);
+    this.fSdfBuffer = new Float32Array(this.sdfBuffer);
+    this.uiSdfBuffer = new Uint32Array(this.sdfBuffer);
 
     this.mode = 'webgl';
 
@@ -246,13 +253,8 @@ export class WebGlRenderer extends CoreRenderer {
         },
       },
     ]);
-    // --- Shared SDF buffer ---------------------------------------------------
-    // Allocate 512 KB for SDF vertex data (~3600 glyphs).
-    const sdfBufSize = 512 * 1024;
-    this.sdfBuffer = new ArrayBuffer(sdfBufSize);
-    this.fSdfBuffer = new Float32Array(this.sdfBuffer);
-    this.uiSdfBuffer = new Uint32Array(this.sdfBuffer);
 
+    // --- Shared SDF buffer collection (CPU buffer allocated above) ----------
     const sdfWebGlBuffer = glw.createBuffer();
     const sdfStride = 6 * Float32Array.BYTES_PER_ELEMENT; // 24 bytes
     this.sdfQuadBufferCollection = new BufferCollection([

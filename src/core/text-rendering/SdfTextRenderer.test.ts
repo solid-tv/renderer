@@ -131,3 +131,20 @@ describe('SdfTextRenderer layout cache', () => {
     expect(SdfFontHandler.getFontData).toHaveBeenCalledTimes(0);
   });
 });
+
+describe('SdfTextRenderer lazy shader compile', () => {
+  it('registers the SDF shader at init but defers compilation', () => {
+    const shManager = {
+      registerShaderType: vi.fn(),
+      createShader: vi.fn(() => ({})),
+    };
+    const fakeStage = { options: { textLayoutCacheSize: 10 }, shManager };
+
+    SdfTextRenderer.init(fakeStage as never);
+
+    // Registration is cheap and stays at boot; the expensive compile + link is
+    // deferred until the first SDF glyph actually renders (see getSdfShader).
+    expect(shManager.registerShaderType).toHaveBeenCalledTimes(1);
+    expect(shManager.createShader).not.toHaveBeenCalled();
+  });
+});
