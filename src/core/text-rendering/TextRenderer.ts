@@ -288,6 +288,24 @@ export interface TrProps extends TrFontProps {
    * @default 'none'
    */
   contain: 'width' | 'height' | 'both' | 'none';
+  /**
+   * Hint that this node's text changes to mostly-unique values frequently
+   * (clocks, counters, live data, scroll positions).
+   *
+   * @remarks
+   *
+   * When `true`, the SDF renderer reuses this node's own layout buffer across
+   * text changes and skips the shared cross-node layout cache. This avoids
+   * both allocating a fresh layout on every update and polluting the shared
+   * cache with throwaway entries that would never be reused.
+   *
+   * Leave `false` for text that repeats or cycles among a bounded set of
+   * strings — those benefit from the shared cache instead. Ignored by the
+   * Canvas text renderer.
+   *
+   * @default false
+   */
+  volatile: boolean;
 }
 
 /**
@@ -435,7 +453,15 @@ export interface TextRenderInfo {
 export interface TextRenderer {
   type: 'canvas' | 'sdf';
   font: FontHandler;
-  renderText: (props: CoreTextNodeProps) => TextRenderInfo;
+  /**
+   * @param reuseLayout - For volatile nodes: a node-owned {@link TextLayout}
+   * to regenerate in place (its glyph buffer is reused, grow-only), bypassing
+   * the shared layout cache. Omitted for the normal shared-cache path.
+   */
+  renderText: (
+    props: CoreTextNodeProps,
+    reuseLayout?: TextLayout | null,
+  ) => TextRenderInfo;
   // Updated to accept layout data and return vertex buffer for performance
   addQuads: (layout?: TextLayout) => Float32Array | null;
   renderQuads: (

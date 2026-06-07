@@ -881,6 +881,7 @@ export class Stage {
     resolvedProps.maxWidth = props.maxWidth || 0;
     resolvedProps.maxHeight = props.maxHeight || 0;
     resolvedProps.forceLoad = props.forceLoad || false;
+    resolvedProps.volatile = props.volatile || false;
     return resolvedProps;
   }
 

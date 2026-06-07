@@ -66,6 +66,7 @@ const defaultProps = (
   overflowSuffix: '...',
   wordBreak: 'break-word',
   contain: 'none',
+  volatile: false,
   // CoreTextNodeProps
   textRendererOverride: null,
   forceLoad: false,

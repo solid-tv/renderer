@@ -49,6 +49,12 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
   // SDF layout caching for performance
   private _cachedLayout: TextLayout | null = null;
 
+  // Node-owned layout for volatile (high-churn) text. Lazily created on first
+  // layout; its glyph buffer is reused in place across text updates so a
+  // changing clock/counter allocates (near) nothing per change. Null unless
+  // `volatile` is set on an SDF node.
+  private _volatileLayout: TextLayout | null = null;
+
   /** Cached pre-transformed SDF vertex data — avoids per-glyph matrix math when static. */
   private _sdfCache: SdfVertexCache = {
     vertices: null,
@@ -204,8 +210,15 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
       if (this.fontHandler.isFontLoaded(this.textProps.fontFamily) === true) {
         this._waitingForFont = false;
         this._cachedLayout = null; // Invalidate cached layout
-        const resp = this.textRenderer.renderText(this.textProps);
+        const reuse = this.resolveVolatileLayout();
+        const resp = this.textRenderer.renderText(this.textProps, reuse);
         this.handleRenderResult(resp);
+        if (reuse !== null) {
+          // The volatile layout object keeps a stable identity across updates,
+          // so the per-node vertex cache (keyed on layout identity) can't see
+          // that the glyph data changed — force it to recompute.
+          this._sdfCache.layoutRef = null;
+        }
         this._layoutGenerated = true;
       } else if (this._waitingForFont === false) {
         this.fontHandler.waitingForFont(this.textProps.fontFamily, this);
@@ -231,6 +244,32 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
     this.setRenderable(
       this.checkBasicRenderability() === true && this._cachedLayout !== null,
     );
+  }
+
+  /**
+   * Return the node-owned layout to regenerate in place, or null for the
+   * normal shared-cache path. Volatile reuse is SDF-only — the Canvas
+   * renderer rebuilds an ImageData + texture per change regardless.
+   */
+  private resolveVolatileLayout(): TextLayout | null {
+    if (this.textProps.volatile !== true || this._type !== 'sdf') {
+      return null;
+    }
+    let layout = this._volatileLayout;
+    if (layout === null) {
+      layout = {
+        glyphs: new Float32Array(0),
+        glyphCount: 0,
+        width: 0,
+        height: 0,
+        fontScale: 1,
+        lineHeight: 0,
+        fontFamily: '',
+        distanceRange: 0,
+      };
+      this._volatileLayout = layout;
+    }
+    return layout;
   }
 
   /**
@@ -360,6 +399,7 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
 
     // Clear cached layout and SDF vertex cache
     this._cachedLayout = null;
+    this._volatileLayout = null;
     this._sdfCache.vertices = null;
     this._sdfCache.layoutRef = null;
 
@@ -588,6 +628,22 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
   set forceLoad(value: boolean) {
     if (this.textProps.forceLoad !== value) {
       this.textProps.forceLoad = value;
+      this.setUpdateType(UpdateType.Local);
+    }
+  }
+
+  get volatile(): boolean {
+    return this.textProps.volatile;
+  }
+
+  set volatile(value: boolean) {
+    if (this.textProps.volatile !== value) {
+      this.textProps.volatile = value;
+      if (value === false) {
+        // Drop the node-owned buffer; subsequent layouts use the shared cache.
+        this._volatileLayout = null;
+      }
+      this._layoutGenerated = false;
       this.setUpdateType(UpdateType.Local);
     }
   }

@@ -132,6 +132,68 @@ describe('SdfTextRenderer layout cache', () => {
   });
 });
 
+const makeVolatileLayout = () =>
+  ({
+    glyphs: new Float32Array(0),
+    glyphCount: 0,
+    width: 0,
+    height: 0,
+    fontScale: 1,
+    lineHeight: 0,
+    fontFamily: '',
+    distanceRange: 0,
+  } as unknown as import('./TextRenderer.js').TextLayout);
+
+describe('SdfTextRenderer volatile path', () => {
+  beforeEach(() => {
+    initRenderer(10);
+    SdfTextRenderer.cleanup();
+    vi.clearAllMocks();
+  });
+
+  it('does not insert volatile layouts into the shared cache', () => {
+    const reuse = makeVolatileLayout();
+
+    // Volatile render of 'Clock' must not populate the shared cache...
+    SdfTextRenderer.renderText(makeProps('Clock'), reuse);
+    vi.clearAllMocks();
+
+    // ...so a later non-volatile render of the same text is still a MISS.
+    SdfTextRenderer.renderText(makeProps('Clock'));
+    expect(SdfFontHandler.getFontData).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the same layout object across updates', () => {
+    const reuse = makeVolatileLayout();
+
+    const r1 = SdfTextRenderer.renderText(makeProps('12:00'), reuse);
+    const r2 = SdfTextRenderer.renderText(makeProps('12:01'), reuse);
+
+    expect(r1.layout).toBe(reuse);
+    expect(r2.layout).toBe(reuse);
+  });
+
+  it('reuses the glyph buffer for equal-or-shorter text, grows for longer', () => {
+    const reuse = makeVolatileLayout();
+
+    const buf = SdfTextRenderer.renderText(makeProps('12:00'), reuse).layout!
+      .glyphs;
+    // Same length -> same backing buffer (zero allocation).
+    expect(
+      SdfTextRenderer.renderText(makeProps('12:01'), reuse).layout!.glyphs,
+    ).toBe(buf);
+    // Shorter -> still reused.
+    expect(
+      SdfTextRenderer.renderText(makeProps('9'), reuse).layout!.glyphs,
+    ).toBe(buf);
+    // Longer than capacity -> grow into a new buffer.
+    expect(
+      SdfTextRenderer.renderText(makeProps('a longer clock string'), reuse)
+        .layout!.glyphs,
+    ).not.toBe(buf);
+  });
+});
+
 describe('SdfTextRenderer lazy shader compile', () => {
   it('registers the SDF shader at init but defers compilation', () => {
     const shManager = {

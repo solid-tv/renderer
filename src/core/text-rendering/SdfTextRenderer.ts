@@ -74,12 +74,37 @@ const getLayoutCacheKey = (props: CoreTextNodeProps): string =>
  * @param props - Text rendering properties
  * @returns Object containing ImageData and dimensions
  */
-const renderText = (props: CoreTextNodeProps): TextRenderInfo => {
+const renderText = (
+  props: CoreTextNodeProps,
+  reuseLayout?: TextLayout | null,
+): TextRenderInfo => {
   // Early return if no text
   if (props.text.length === 0) {
     return {
       width: 0,
       height: 0,
+    };
+  }
+
+  // --- Volatile path ------------------------------------------------------
+  // High-churn text (clock/counter/live data): regenerate into the node's own
+  // layout, reusing its glyph buffer and bypassing the shared layoutCache.
+  // No cache-key string is built, and no throwaway entry is retained.
+  if (reuseLayout !== undefined && reuseLayout !== null) {
+    const fontData = SdfFontHandler.getFontData(props.fontFamily);
+    if (fontData === undefined) {
+      return {
+        width: 0,
+        height: 0,
+      };
+    }
+    const layout = generateTextLayout(props, fontData, reuseLayout);
+    return {
+      remainingLines: 0,
+      hasRemainingText: false,
+      width: layout.width,
+      height: layout.height,
+      layout,
     };
   }
 
@@ -247,6 +272,7 @@ const renderQuads = (
 const generateTextLayout = (
   props: CoreTextNodeProps,
   fontCache: SdfFontHandler.SdfFont,
+  out?: TextLayout,
 ): TextLayout => {
   const fontSize = props.fontSize;
   const fontFamily = props.fontFamily;
@@ -313,8 +339,14 @@ const generateTextLayout = (
   }
 
   // Packed glyph buffer: SDF_GLYPH_STRIDE floats per glyph. One Float32Array
-  // replaces what used to be one object literal per glyph.
-  const glyphs = new Float32Array(maxGlyphs * SDF_GLYPH_STRIDE);
+  // replaces what used to be one object literal per glyph. When `out` is given
+  // (volatile nodes), reuse its buffer in place — grow-only, so steady-state
+  // text updates of equal-or-shorter length allocate nothing here.
+  const needed = maxGlyphs * SDF_GLYPH_STRIDE;
+  const glyphs =
+    out !== undefined && out.glyphs.length >= needed
+      ? out.glyphs
+      : new Float32Array(needed);
   let glyphIdx = 0;
   let glyphCount = 0;
   let currentX = 0;
@@ -391,17 +423,19 @@ const generateTextLayout = (
     }
   }
 
-  // Convert final dimensions to pixel space for the layout
-  return {
-    glyphs,
-    glyphCount,
-    distanceRange: fontScale * fontData.distanceField.distanceRange,
-    width: effectiveWidth * fontScale,
-    height: effectiveHeight,
-    fontScale: fontScale,
-    lineHeight: lineHeightPx,
-    fontFamily,
-  };
+  // Convert final dimensions to pixel space for the layout. Reuse the caller's
+  // layout object when provided (volatile path) so an update allocates neither
+  // a new layout nor — when the buffer fit — a new glyph array.
+  const result = out !== undefined ? out : ({} as TextLayout);
+  result.glyphs = glyphs;
+  result.glyphCount = glyphCount;
+  result.distanceRange = fontScale * fontData.distanceField.distanceRange;
+  result.width = effectiveWidth * fontScale;
+  result.height = effectiveHeight;
+  result.fontScale = fontScale;
+  result.lineHeight = lineHeightPx;
+  result.fontFamily = fontFamily;
+  return result;
 };
 
 /**
