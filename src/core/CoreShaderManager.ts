@@ -54,7 +54,7 @@ export class CoreShaderManager {
       );
       return;
     }
-    this.shTypes[name] = deepClone(shType);
+    this.shTypes[name] = shType;
   }
 
   /**
