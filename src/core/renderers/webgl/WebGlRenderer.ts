@@ -9,6 +9,7 @@ import {
   CoreRenderer,
   type BufferInfo,
   type CoreRendererOptions,
+  type RendererCapabilities,
 } from '../CoreRenderer.js';
 import { SdfRenderOp } from './SdfRenderOp.js';
 import type { CoreContextTexture } from '../CoreContextTexture.js';
@@ -1287,6 +1288,17 @@ export class WebGlRenderer extends CoreRenderer {
       totalUsed: this.quadBufferUsage,
     };
     return bufferInfo;
+  }
+
+  getCapabilities(): RendererCapabilities {
+    const glw = this.glw;
+    return {
+      renderMode: 'webgl',
+      webGlVersion: glw.isWebGl2 ? 2 : 1,
+      vertexArrayObject: glw.canUseVertexArrayObject,
+      maxTextureSize: glw.getParameter(glw.MAX_TEXTURE_SIZE) as number,
+      maxTextureUnits: glw.getParameter(glw.MAX_TEXTURE_IMAGE_UNITS) as number,
+    };
   }
 
   /**
