@@ -111,7 +111,10 @@ export class WebGlContextWrapper {
   public readonly INVALID_OPERATION: number;
   //#endregion WebGL Enums
 
-  constructor(private gl: WebGLRenderingContext | WebGL2RenderingContext) {
+  constructor(
+    private gl: WebGLRenderingContext | WebGL2RenderingContext,
+    disableVertexArrayObject = false,
+  ) {
     // A freshly created WebGL context is in a fully specified default state.
     // Rather than reading that state back with getParameter/isEnabled — each a
     // synchronous CPU<->GPU round-trip, and previously ~one per texture unit
@@ -154,9 +157,16 @@ export class WebGlContextWrapper {
       self.WebGL2RenderingContext && gl instanceof self.WebGL2RenderingContext
         ? (gl as WebGL2RenderingContext)
         : null;
+    // `disableVertexArrayObject` forces the per-draw attribute-binding path even
+    // when VAOs are available (diagnostics / benchmarking). isWebGl2 still
+    // reflects the real context — the flag only gates VAO usage.
     this.vaoExt =
-      this.gl2 === null ? gl.getExtension('OES_vertex_array_object') : null;
-    this.canUseVertexArrayObject = this.gl2 !== null || this.vaoExt !== null;
+      this.gl2 === null && disableVertexArrayObject !== true
+        ? gl.getExtension('OES_vertex_array_object')
+        : null;
+    this.canUseVertexArrayObject =
+      disableVertexArrayObject !== true &&
+      (this.gl2 !== null || this.vaoExt !== null);
     this.isWebGl2 = this.gl2 !== null;
 
     this.canvas = gl.canvas;

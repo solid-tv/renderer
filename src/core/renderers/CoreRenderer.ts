@@ -11,6 +11,7 @@ export interface CoreRendererOptions {
   canvas: HTMLCanvasElement | OffscreenCanvas;
   contextSpy: ContextSpy | null;
   forceWebGL2: boolean;
+  disableVertexArrayObject: boolean;
 }
 
 export interface BufferInfo {

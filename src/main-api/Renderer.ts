@@ -543,6 +543,23 @@ export type RendererMainSettings = RendererRuntimeSettings & {
   forceWebGL2: boolean;
 
   /**
+   * Disable Vertex Array Objects
+   *
+   * @remarks
+   * By default the WebGL renderer caches each shader program's attribute layout
+   * in a Vertex Array Object (native on WebGL2, or via the
+   * `OES_vertex_array_object` extension on WebGL1) and binds it with a single
+   * call per draw instead of re-pointing every attribute. Set this to `true` to
+   * force the per-draw attribute-binding path instead.
+   *
+   * This is primarily a diagnostic/benchmarking switch — it lets you A/B the VAO
+   * optimization on a target device. It has no effect on the Canvas renderer.
+   *
+   * @defaultValue `false`
+   */
+  disableVertexArrayObject: boolean;
+
+  /**
    * Canvas object to use for rendering
    *
    * @remarks
@@ -717,6 +734,7 @@ export class RendererMain extends EventEmitter {
         settings.numImageWorkers !== undefined ? settings.numImageWorkers : 2,
       enableContextSpy: settings.enableContextSpy ?? false,
       forceWebGL2: settings.forceWebGL2 ?? false,
+      disableVertexArrayObject: settings.disableVertexArrayObject ?? false,
       inspector: settings.inspector ?? false,
       inspectorOptions: settings.inspectorOptions ?? {},
       renderEngine: settings.renderEngine,
@@ -779,6 +797,7 @@ export class RendererMain extends EventEmitter {
       devicePhysicalPixelRatio,
       enableContextSpy: settings.enableContextSpy!,
       forceWebGL2: settings.forceWebGL2!,
+      disableVertexArrayObject: settings.disableVertexArrayObject!,
       fpsUpdateInterval: settings.fpsUpdateInterval!,
       enableClear: settings.enableClear!,
       numImageWorkers: settings.numImageWorkers!,
