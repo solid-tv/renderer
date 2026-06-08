@@ -68,6 +68,7 @@ const defaultPhysicalPixelRatio = 1;
   const perfMultiplier = Number(urlParams.get('multiplier')) || 1;
   const resolution = Number(urlParams.get('resolution')) || 720;
   const enableInspector = urlParams.get('inspector') === 'true';
+  const forceWebGL2 = urlParams.get('webgl2') === 'true';
   const textureProcessingLimit =
     Number(urlParams.get('textureProcessingLimit')) || 0;
   const globalTargetFPS = Number(urlParams.get('targetFPS')) || undefined;
@@ -94,6 +95,7 @@ const defaultPhysicalPixelRatio = 1;
       enableContextSpy,
       perfMultiplier,
       enableInspector,
+      forceWebGL2,
       textureProcessingLimit,
       globalTargetFPS,
     );
@@ -121,6 +123,7 @@ async function runTest(
   enableContextSpy: boolean,
   perfMultiplier: number,
   enableInspector: boolean,
+  forceWebGL2: boolean,
   textureProcessingLimit: number,
   globalTargetFPS?: number,
 ) {
@@ -145,6 +148,7 @@ async function runTest(
     logicalPixelRatio,
     physicalPixelRatio,
     enableInspector,
+    forceWebGL2,
     textureProcessingLimit,
     customSettings,
   );
@@ -219,6 +223,7 @@ async function initRenderer(
   logicalPixelRatio: number,
   physicalPixelRatio: number,
   enableInspector: boolean,
+  forceWebGL2?: boolean,
   textureProcessingTimeLimit?: number,
   customSettings?: Partial<RendererMainSettings>,
 ) {
@@ -234,6 +239,7 @@ async function initRenderer(
       clearColor: 0x00000000,
       fpsUpdateInterval: logFps ? 1000 : 0,
       enableContextSpy,
+      forceWebGL2,
       inspector,
       renderEngine: renderMode === 'webgl' ? WebGlRenderer : CanvasRenderer,
       fontEngines: [SdfTextRenderer, CanvasTextRenderer],
