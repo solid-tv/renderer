@@ -164,6 +164,9 @@ function createDebugOverlay(renderer: RendererMain): void {
         total += spy[key]!;
       }
       const at = (k: string): number => spy[k] ?? 0;
+      // VAO calls land under different names by backend: native WebGL2 uses
+      // `bindVertexArray`, WebGL1 uses the extension's `bindVertexArrayOES`.
+      const bindVao = at('bindVertexArray') + at('bindVertexArrayOES');
       lines.push(`GL calls/interval: ${total}`);
       lines.push(
         `vAttribPtr ${at('vertexAttribPointer')}  enaVAA ${at(
@@ -171,9 +174,9 @@ function createDebugOverlay(renderer: RendererMain): void {
         )}`,
       );
       lines.push(
-        `bindVAO ${at('bindVertexArray')}  drawElem ${at(
-          'drawElements',
-        )}  prog ${at('useProgram')}`,
+        `bindVAO ${bindVao}  drawElem ${at('drawElements')}  prog ${at(
+          'useProgram',
+        )}`,
       );
     }
 

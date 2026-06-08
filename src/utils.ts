@@ -29,17 +29,33 @@ export function createWebGLContext(
     throw new Error('Unable to create WebGL context');
   }
   if (contextSpy) {
-    // Proxy the GL context to log all GL calls
-    return new Proxy(gl, {
+    // Proxy the GL context — and any extension object it hands out — so every
+    // call is counted. The renderer routes WebGL1 Vertex Array Object calls
+    // through the OES_vertex_array_object extension object; without wrapping
+    // that object its methods (bindVertexArrayOES / createVertexArrayOES /
+    // deleteVertexArrayOES) would bypass the spy entirely. On WebGL2 the same
+    // calls live on the context itself and are already captured.
+    const handler: ProxyHandler<object> = {
       get(target, prop) {
-        const value = target[prop as never] as unknown;
-        if (typeof value === 'function') {
-          contextSpy.increment(String(prop));
-          return value.bind(target);
+        const value = (target as Record<string | symbol, unknown>)[prop];
+        if (typeof value !== 'function') {
+          return value;
         }
-        return value;
+        contextSpy.increment(String(prop));
+        const fn = value as (...args: unknown[]) => unknown;
+        if (prop === 'getExtension') {
+          return (...args: unknown[]): unknown => {
+            const ext = fn.apply(target, args);
+            if (ext !== null && typeof ext === 'object') {
+              return new Proxy(ext, handler);
+            }
+            return ext;
+          };
+        }
+        return fn.bind(target);
       },
-    });
+    };
+    return new Proxy(gl as object, handler) as unknown as WebGLRenderingContext;
   }
 
   return gl;
