@@ -133,6 +133,15 @@ export class WebGlRenderer extends CoreRenderer {
   defaultShaderNode: WebGlShaderNode | null = null;
   quadBufferCollection: BufferCollection;
 
+  /**
+   * Shared static element (index) buffer for quad rendering.
+   *
+   * @remarks
+   * Bound once globally, but also recorded into each shader program's Vertex
+   * Array Object since the element-array binding is part of VAO state.
+   */
+  indexBuffer: WebGLBuffer | null = null;
+
   clearColor: WebGlColor = {
     raw: 0x00000000,
     normalized: [0, 0, 0, 0],
@@ -187,7 +196,7 @@ export class WebGlRenderer extends CoreRenderer {
     glw.setBlend(true);
     glw.blendFunc(glw.ONE, glw.ONE_MINUS_SRC_ALPHA);
 
-    createIndexBuffer(glw, this.stage.bufferMemory);
+    this.indexBuffer = createIndexBuffer(glw, this.stage.bufferMemory);
 
     // Create the static node coords buffer
     // 80 is the magic number used in createIndexBuffer
