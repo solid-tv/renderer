@@ -10,6 +10,7 @@ export interface CoreRendererOptions {
   stage: Stage;
   canvas: HTMLCanvasElement | OffscreenCanvas;
   contextSpy: ContextSpy | null;
+  forceWebGL2: boolean;
 }
 
 export interface BufferInfo {

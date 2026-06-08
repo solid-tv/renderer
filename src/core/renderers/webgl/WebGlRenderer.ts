@@ -172,7 +172,11 @@ export class WebGlRenderer extends CoreRenderer {
 
     this.mode = 'webgl';
 
-    const gl = createWebGLContext(options.canvas, options.contextSpy);
+    const gl = createWebGLContext(
+      options.canvas,
+      options.forceWebGL2,
+      options.contextSpy,
+    );
     const glw = (this.glw = new WebGlContextWrapper(gl));
     glw.viewport(0, 0, options.canvas.width, options.canvas.height);
 
