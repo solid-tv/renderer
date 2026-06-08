@@ -64,6 +64,8 @@ export class WebGlContextWrapper {
    * every attribute on each draw.
    */
   public readonly canUseVertexArrayObject: boolean;
+  /** True when the underlying context is a WebGL2RenderingContext. */
+  public readonly isWebGl2: boolean;
   //#endregion Vertex Array Objects
 
   //#region Canvas
@@ -155,6 +157,7 @@ export class WebGlContextWrapper {
     this.vaoExt =
       this.gl2 === null ? gl.getExtension('OES_vertex_array_object') : null;
     this.canUseVertexArrayObject = this.gl2 !== null || this.vaoExt !== null;
+    this.isWebGl2 = this.gl2 !== null;
 
     this.canvas = gl.canvas;
 
