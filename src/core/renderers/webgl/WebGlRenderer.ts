@@ -187,7 +187,10 @@ export class WebGlRenderer extends CoreRenderer {
       options.forceWebGL2,
       options.contextSpy,
     );
-    const glw = (this.glw = new WebGlContextWrapper(gl));
+    const glw = (this.glw = new WebGlContextWrapper(
+      gl,
+      options.disableVertexArrayObject,
+    ));
     glw.viewport(0, 0, options.canvas.width, options.canvas.height);
 
     this.attachContextLossListeners(options.canvas);

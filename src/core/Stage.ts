@@ -185,6 +185,7 @@ export class Stage {
       boundsMargin,
       enableContextSpy,
       forceWebGL2,
+      disableVertexArrayObject,
       numImageWorkers,
       textureMemory,
       renderEngine,
@@ -256,6 +257,7 @@ export class Stage {
       canvas,
       contextSpy: this.contextSpy,
       forceWebGL2,
+      disableVertexArrayObject,
     });
 
     this.shManager = new CoreShaderManager(this);

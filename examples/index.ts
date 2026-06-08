@@ -210,6 +210,9 @@ async function runTest(
   // `?debug=true` shows a live on-screen stats overlay. It needs periodic
   // fpsUpdate events and the context spy (for GL call counts), so force them on.
   const debug = urlParams.get('debug') === 'true';
+  // `?novao=true` forces the per-draw attribute-binding path (VAOs off) so the
+  // VAO optimization can be A/B'd on a target device.
+  const disableVertexArrayObject = urlParams.get('novao') === 'true';
 
   const customSettings: Partial<RendererMainSettings> = {
     ...(typeof module.customSettings === 'function'
@@ -217,6 +220,7 @@ async function runTest(
       : {}),
     ...(globalTargetFPS !== undefined && { targetFPS: globalTargetFPS }),
     ...(debug && { enableContextSpy: true, fpsUpdateInterval: 500 }),
+    ...(disableVertexArrayObject && { disableVertexArrayObject: true }),
   };
 
   const { renderer, appElement } = await initRenderer(
