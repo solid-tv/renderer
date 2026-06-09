@@ -1,6 +1,5 @@
 import type { INode } from '@lightningjs/renderer';
 import type { ExampleSettings } from '../common/ExampleSettings.js';
-import { waitUntilIdle } from '../common/utils.js';
 
 import rockoPng from '../assets/rocko.png';
 
@@ -49,7 +48,13 @@ async function waitFor(
 
 export async function automation(settings: ExampleSettings) {
   await test(settings);
-  await waitUntilIdle(settings.renderer);
+  // test() already awaited the reload's 'loaded' event, so the scene is fully
+  // settled. waitUntilIdle() must NOT be used here: 'idle' fires once per
+  // active->idle transition, which has already happened by now, so the listener
+  // would wait forever and hang the (timeout-less) VRT runner. Force a final
+  // frame and let it draw instead.
+  settings.renderer.rerender();
+  await delay(100);
   await settings.snapshot();
 }
 
