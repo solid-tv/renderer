@@ -26,6 +26,11 @@ You can use Docker Desktop if you have a license. If you don’t, use Colima or 
 
 #### Option 2: Colima (Open Source Docker Alternative)
 
+[Colima](https://colima.dev/) ("Containers in Lima") runs the Docker daemon
+inside a lightweight Linux VM on macOS, so the standard `docker` CLI works
+without Docker Desktop — and without Docker Desktop's commercial license. It is
+the recommended free option on Mac.
+
 1. Install the Docker CLI using [Homebrew](https://brew.sh/):
    ```bash
    brew install docker
@@ -38,11 +43,19 @@ You can use Docker Desktop if you have a license. If you don’t, use Colima or 
    ```bash
    colima start
    ```
+   If the visual-regression run is heavy, give the VM more headroom (the
+   setting persists): `colima start --cpu 4 --memory 8`.
 4. Test Docker with Colima:
    ```bash
    docker ps
    ```
    It should run without errors.
+
+> **Colima does not start automatically.** The VM is stopped after a reboot (or
+> after `colima stop`), so `docker` — and therefore `pnpm test:visual --ci` —
+> will fail until you bring it back up. Whenever you see _"Cannot connect to the
+> Docker daemon"_ or _"colima is not running"_, run `colima start` (check state
+> any time with `colima status`). See [Troubleshooting](#troubleshooting).
 
 #### Option 3: Podman (Docker Alternative)
 
@@ -139,6 +152,23 @@ After installing a container runtime, you must build the Visual Regression Test 
    REPOSITORY                     TAG             IMAGE ID       CREATED         SIZE
    visual-regression              latest          40476ed4acae   3 minutes ago   2.09GB
    ```
+
+---
+
+## Troubleshooting
+
+**`docker` commands (or `pnpm test:visual --ci`) fail with "Cannot connect to
+the Docker daemon".** Your container runtime is installed but not running. Start
+it for this session:
+
+| Runtime        | Start command          | Check status    |
+| -------------- | ---------------------- | --------------- |
+| Colima         | `colima start`         | `colima status` |
+| Podman         | `podman machine start` | `podman ps`     |
+| Docker Desktop | launch the Docker app  | `docker ps`     |
+
+This is the most common reason a `--ci` run fails before any test executes —
+the runtime simply isn't up (e.g. after a reboot). None of these auto-start.
 
 ---
 
