@@ -33,11 +33,14 @@ import elevator from '../assets/robot/elevator-background.png';
  *   Left / Right : cycle scene tier (rect -> +image -> +text -> full card)
  *   Enter (OK)   : toggle an alpha pulse on every card (adds per-frame churn)
  *
- * Automatic sweep — find the "sweet spot" (highest card count that still holds
- * the target frame rate) for every tier, no remote needed:
- *   ?test=stress-tv&autosweep=true            (target 60 fps)
- *   ?test=stress-tv&autosweep=true&targetfps=30
- * Results print to the console (console.table) and to an on-screen panel.
+ * Automatic sweep — find the "sweet spot" (highest card count that still LOADS
+ * within a time budget) for every tier, no remote needed:
+ *   ?test=stress-tv&autosweep=true               (default 1000ms budget)
+ *   ?test=stress-tv&autosweep=true&loadbudget=500
+ * Load time (build -> renderer idle) is the metric that matters on a TV; the
+ * steady-state FPS of a static grid just pins at the panel refresh, so it is
+ * reported only as a secondary number. Results print to the console
+ * (console.table) and to an on-screen panel.
  * VAO is fixed at renderer construction, so A/B it with two runs and compare:
  *   ?test=stress-tv&autosweep=true   vs   ?test=stress-tv&autosweep=true&novao=true
  */
@@ -135,7 +138,7 @@ export default async function test({
 }: ExampleSettings) {
   const params = new URLSearchParams(window.location.search);
   const autosweep = params.get('autosweep') === 'true';
-  const targetFps = Number(params.get('targetfps') ?? 60);
+  const loadBudgetMs = Number(params.get('loadbudget') ?? 1000);
   const vaoOff = params.get('novao') === 'true';
 
   renderer.createNode({
@@ -292,65 +295,76 @@ export default async function test({
     }
   };
 
-  // Drive every tier from low to high, find the highest count that holds the
-  // target frame rate, then bisect between the last good rung and the first bad
-  // one for a sharper number. Counts are clamped to the index-buffer cap so the
-  // sweep never builds a scene whose own text would drop out.
-  const runAutoSweep = async (targetFps: number): Promise<void> => {
-    // Measure raw capability, not a throttle.
-    renderer.targetFPS = 0;
-    const meets = (fps: number): boolean => fps >= targetFps - 2;
+  // Drive every tier from low to high and find the highest card count that
+  // still LOADS within the budget, then bisect for a sharper number.
+  //
+  // Why load time, not FPS: on a vsync-capped TV the steady-state FPS of a
+  // static grid just pins at the panel refresh (60), so it never reveals a
+  // limit — every tier would "sweet-spot" at the index cap. The cost that
+  // actually hurts is the one-time build + texture upload (the slow load /
+  // eventual OOM). We measure that and keep FPS only as a secondary readout.
+  const runAutoSweep = async (budgetMs: number): Promise<void> => {
+    renderer.targetFPS = 0; // measure raw capability, not a throttle
+
+    // Time from buildGrid() until the renderer goes idle — i.e. how long the
+    // screen takes to load (nodes created, every texture decoded/uploaded,
+    // text laid out).
+    const measureLoadTime = async (count: number): Promise<number> => {
+      const t0 = performance.now();
+      buildGrid(count);
+      await waitUntilIdle(renderer);
+      return performance.now() - t0;
+    };
 
     interface SweepResult {
       tier: string;
       sweetSpot: number;
+      loadMs: number;
       fps: number;
       limiter: string;
-      indexCap: number;
     }
     const results: SweepResult[] = [];
+    const ladderMax = COUNT_LADDER[COUNT_LADDER.length - 1]!;
 
     for (let t = 0; t < TIER_NAMES.length; t++) {
       tier = t;
+      // Never test past the index cap (text/geometry would drop) OR the ladder
+      // max — building the full index cap (up to 16384) would itself hang/OOM
+      // the device, which is the very thing we're trying to avoid.
       const cap = correctnessCap(t);
       const rungs = COUNT_LADDER.filter((c) => c <= cap);
-      if (cap !== Infinity && rungs[rungs.length - 1] !== cap) {
-        rungs.push(cap);
-      }
 
       let lastGood = 0;
-      let lastGoodFps = 0;
+      let lastGoodLoad = 0;
       let firstBad = 0;
       for (let r = 0; r < rungs.length; r++) {
         const count = rungs[r]!;
-        buildGrid(count);
-        hud.text = `auto-sweep — tier ${t + 1}/${
+        hud.text = `auto-sweep - tier ${t + 1}/${
           TIER_NAMES.length
-        }, testing ${count} cards…`;
-        const fps = await measureFps(35);
-        console.log(`  tier ${t + 1}  ${count} cards  ${fps.toFixed(1)} fps`);
-        if (meets(fps) === true) {
+        }, loading ${count} cards...`;
+        const load = await measureLoadTime(count);
+        console.log(`  tier ${t + 1}  ${count} cards  ${Math.round(load)}ms`);
+        if (load <= budgetMs) {
           lastGood = count;
-          lastGoodFps = fps;
+          lastGoodLoad = load;
         } else {
           firstBad = count;
           break;
         }
       }
 
-      // Bisect the gap between the last good and first bad rung.
+      // Bisect the gap between the last in-budget rung and the first over it.
       let sweet = lastGood;
-      let sweetFps = lastGoodFps;
+      let sweetLoad = lastGoodLoad;
       if (firstBad > 0 && firstBad - lastGood > 25) {
         let lo = lastGood;
         let hi = firstBad;
         while (hi - lo > 25) {
           const mid = (lo + hi) >> 1;
-          buildGrid(mid);
-          const fps = await measureFps(30);
-          if (meets(fps) === true) {
+          const load = await measureLoadTime(mid);
+          if (load <= budgetMs) {
             lo = mid;
-            sweetFps = fps;
+            sweetLoad = load;
           } else {
             hi = mid;
           }
@@ -358,36 +372,42 @@ export default async function test({
         sweet = lo;
       }
 
+      // Steady-state FPS at the sweet spot — informational only (pins at the
+      // panel refresh on capable hardware).
+      buildGrid(sweet);
+      await waitUntilIdle(renderer);
+      const fps = Math.round(await measureFps(30));
+
       const limiter =
         firstBad > 0
-          ? `${targetFps}fps`
-          : cap !== Infinity && sweet >= cap
+          ? `>${budgetMs}ms load`
+          : cap < ladderMax
           ? 'index cap'
           : 'ladder max';
       results.push({
         tier: TIER_NAMES[t]!,
         sweetSpot: sweet,
-        fps: Math.round(sweetFps),
+        loadMs: Math.round(sweetLoad),
+        fps,
         limiter,
-        indexCap: cap === Infinity ? 0 : cap,
       });
     }
 
-    console.log(`\n=== stress-tv sweet spots (target ${targetFps} fps) ===`);
+    console.log(`\n=== stress-tv sweet spots (load budget ${budgetMs}ms) ===`);
     console.table(results);
 
     // Render the verdict on screen (small scene — well under the cap).
     gridRoot.destroy();
     cards = [];
     hud.text = '';
-    let panel = `SWEET SPOT @ ${targetFps} fps   (VAO ${
+    let panel = `SWEET SPOT - loads in <${budgetMs}ms   (VAO ${
       vaoOff === true ? 'OFF' : 'ON'
     })\n`;
     for (let i = 0; i < results.length; i++) {
       const r = results[i]!;
-      panel += `tier ${i + 1}: ${r.sweetSpot} cards  (${
+      panel += `tier ${i + 1}: ${r.sweetSpot} cards  (${r.loadMs}ms load, ${
         r.fps
-      } fps, limited by ${r.limiter})\n`;
+      } fps, ${r.limiter})\n`;
     }
     panel += 'Re-run with &novao=true to compare VAO off.';
     renderer.createTextNode({
@@ -404,7 +424,7 @@ export default async function test({
   };
 
   if (autosweep === true) {
-    void runAutoSweep(targetFps);
+    void runAutoSweep(loadBudgetMs);
     return;
   }
 
