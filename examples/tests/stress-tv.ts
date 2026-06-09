@@ -49,7 +49,7 @@ const IMAGES = [lightning, rocko, testscreen, robot, environment, elevator];
 
 // Card-count ladder. Up/Down move one rung so the whole range is reachable in
 // a handful of remote presses from the couch.
-const COUNT_LADDER = [50, 100, 200, 400, 800, 1200, 1600, 2000, 3000];
+const COUNT_LADDER = [50, 100, 200, 400, 800, 1200, 1600, 2000];
 
 const TIER_NAMES = [
   '1: rounded rect only',
