@@ -88,29 +88,29 @@ const ANIM_BASE_MS = 1200;
 // never silently drops.
 const MAX_COUNT = 1000;
 
-// Median FPS over `frames` animation frames, discarding a short warm-up so a
+// Average FPS over `frames` animation frames, discarding a short warm-up so a
 // freshly-added batch (animation registration, any first-frame upload) doesn't
-// skew the reading.
+// skew the reading. Average = frames / elapsed-seconds over the sampled window.
 const measureFps = (frames: number): Promise<number> =>
   new Promise((resolve) => {
-    const deltas: number[] = [];
     const warmup = 8;
     let seen = 0;
+    let sampled = 0;
+    let sumMs = 0;
     let last = performance.now();
     const tick = (now: number): void => {
       const d = now - last;
       last = now;
       seen++;
       if (seen > warmup) {
-        deltas.push(d);
+        sumMs += d;
+        sampled++;
       }
-      if (deltas.length < frames) {
+      if (sampled < frames) {
         requestAnimationFrame(tick);
         return;
       }
-      deltas.sort((a, b) => a - b);
-      const median = deltas[deltas.length >> 1]!;
-      resolve(1000 / median);
+      resolve((sampled * 1000) / sumMs);
     };
     requestAnimationFrame(tick);
   });
@@ -406,8 +406,11 @@ export default async function test({
 
   // Ramp: add elements until sustained FPS drops to the target (or we approach
   // the index-buffer cap). Batch grows ~15% per step so the ramp is geometric
-  // rather than thousands of tiny steps.
+  // rather than thousands of tiny steps. Each adjustment's card count + average
+  // FPS is recorded so the summary can list the full FPS-vs-load curve.
+  const steps: { cards: number; fps: number }[] = [];
   let fps = await measureFps(20);
+  steps.push({ cards: count, fps });
   updateHud(fps);
   console.log(`stress-animation: ${count} cards -> ${Math.round(fps)} fps`);
 
@@ -419,6 +422,7 @@ export default async function test({
     addCards(batch);
 
     fps = await measureFps(20);
+    steps.push({ cards: count, fps });
     updateHud(fps);
     console.log(`stress-animation: ${count} cards -> ${Math.round(fps)} fps`);
   }
@@ -439,21 +443,23 @@ export default async function test({
   sceneRoot.destroy();
   hud.text = '';
 
+  // Stats block, left column — pushed below the top-left debug panel (0..172px)
+  // so it never sits underneath it.
   renderer.createTextNode({
     x: 120,
-    y: 260,
-    w: APP_W - 240,
+    y: 210,
+    w: 820,
     contain: 'width',
     fontFamily: 'Ubuntu',
     textRendererOverride: 'sdf',
-    fontSize: 44,
-    lineHeight: 66,
+    fontSize: 34,
+    lineHeight: 48,
     color: 0xffffffff,
     zIndex: 100000,
     parent: testRoot,
     text:
       `TEST COMPLETE\n\n` +
-      `Stopped: ${reason}  (sustained FPS ${finalFps})\n\n` +
+      `Stopped: ${reason}  (final avg FPS ${finalFps})\n\n` +
       `Cards animated:    ${animatedCards}\n` +
       `Nodes drawn:       ${drawnNodes}   (bg + thumbnail / card)\n` +
       `Animated rows:     ${animatedRows}   (drivers; every card moves)\n` +
@@ -461,10 +467,37 @@ export default async function test({
       `Backend / VAO:     ${sumBackend} / ${sumVao}`,
   });
 
+  // Per-adjustment average FPS — the full FPS-vs-load curve from the ramp.
+  let curve = 'AVG FPS PER ADJUSTMENT\n';
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i]!;
+    const n = `${i + 1}`.padStart(2, ' ');
+    const cards = `${s.cards}`.padStart(4, ' ');
+    curve += `${n}.  ${cards} cards  ->  ${Math.round(s.fps)} fps\n`;
+  }
+  // FPS-vs-load curve, right column — beside the stats, clear of both overlays.
+  renderer.createTextNode({
+    x: 1020,
+    y: 210,
+    w: 760,
+    contain: 'width',
+    fontFamily: 'Ubuntu',
+    textRendererOverride: 'sdf',
+    fontSize: 24,
+    lineHeight: 32,
+    color: 0x9fb4d8ff, // slate-300 (0xRRGGBBAA)
+    zIndex: 100000,
+    parent: testRoot,
+    text: curve,
+  });
+
   console.log(
     `\n=== stress-animation result (VAO ${sumVao.toUpperCase()}) ===`,
   );
   console.log(
-    `${animatedCards} animated cards, ${drawnNodes} nodes drawn, sustained down to ${finalFps} fps (stopped: ${reason})`,
+    `${animatedCards} animated cards, ${drawnNodes} nodes drawn, final avg ${finalFps} fps (stopped: ${reason})`,
+  );
+  console.table(
+    steps.map((s) => ({ cards: s.cards, avgFps: Math.round(s.fps) })),
   );
 }
