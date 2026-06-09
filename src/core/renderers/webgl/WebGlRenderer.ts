@@ -175,6 +175,14 @@ export class WebGlRenderer extends CoreRenderer {
    */
   lastUploadedBufferSize = 0;
   /**
+   * Count of main-scene nodes whose quad data changed this frame and which
+   * own a buffer slot. Accumulated for free during the addQuad pass (which
+   * already branches on isQuadDirty) and consumed in render() to choose
+   * between surgical bufferSubData uploads and a single full bufferData,
+   * avoiding a separate counting loop. Reset each frame in reset().
+   */
+  dirtyQuadCount = 0;
+  /**
    * Whether the renderer is currently rendering to a texture.
    */
   public renderToTextureActive = false;
@@ -362,6 +370,7 @@ export class WebGlRenderer extends CoreRenderer {
     }
     this.curRenderOp = null;
     this.curSdfRenderOp = null;
+    this.dirtyQuadCount = 0;
     this.sdfBufferIdx = 0;
     this.sdfQuadCount = 0;
     this.renderOps.length = 0;
@@ -512,6 +521,14 @@ export class WebGlRenderer extends CoreRenderer {
     // The GPU upload is deferred to render().
     // During RTT, always write since the buffer is rebuilt from scratch.
     if (!DIRTY_QUAD_BUFFER || isRTT || node.isQuadDirty) {
+      // Count main-scene dirty nodes here, while we already have the node in
+      // hand, so render() can pick full vs. surgical upload without a second
+      // pass over the render list. Slot is guaranteed assigned at this point
+      // (i = quadBufferIndex above), so no quadBufferIndex !== -1 guard needed.
+      if (DIRTY_QUAD_BUFFER && isRTT === false && node.isQuadDirty === true) {
+        this.dirtyQuadCount++;
+      }
+
       const rc = node.renderCoords!;
       const tc = node.textureCoords || this.defaultTextureCoords;
 
@@ -992,17 +1009,11 @@ export class WebGlRenderer extends CoreRenderer {
 
       // Otherwise decide adaptively: if the number of nodes we would upload
       // surgically exceeds FULL_UPLOAD_DIRTY_RATIO of the render list, a single
-      // bufferData is cheaper than that many bufferSubData calls. Counting is a
-      // cheap boolean pass; it runs only when we aren't already forced full.
+      // bufferData is cheaper than that many bufferSubData calls. The count was
+      // accumulated for free during the addQuad pass (dirtyQuadCount), so no
+      // separate counting loop is needed here.
       if (fullUpload === false) {
-        let dirtyUploads = 0;
-        for (let i = 0; i < len; i++) {
-          const node = renderList[i]!;
-          if (node.isQuadDirty === true && node.quadBufferIndex !== -1) {
-            dirtyUploads++;
-          }
-        }
-        fullUpload = dirtyUploads > len * FULL_UPLOAD_DIRTY_RATIO;
+        fullUpload = this.dirtyQuadCount > len * FULL_UPLOAD_DIRTY_RATIO;
       }
 
       if (fullUpload === true) {
