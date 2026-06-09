@@ -51,8 +51,12 @@ To run the tests in a Docker container with the `ci` runtime environment, use `-
 pnpm test:visual --ci
 ```
 
-NOTE: For this to work, you must have Docker installed and have built the
-Visual Regression Docker Image. See [DOCKER.md](./DOCKER.md) for more info.
+NOTE: For this to work you need a container runtime **installed and running**
+(Docker Desktop, or [Colima](https://colima.dev/) via `colima start`, or Podman)
+and the Visual Regression Docker Image built. On a fresh shell or after a reboot
+the runtime is usually stopped — if `docker` can't reach the daemon, start it
+first. See [DOCKER.md](./DOCKER.md), including its
+[Troubleshooting](./DOCKER.md#troubleshooting) section.
 
 ### Comparison Mode (Default)
 
