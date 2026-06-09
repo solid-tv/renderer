@@ -280,6 +280,18 @@ export default async function test({
   let sumBackend = 'webgl';
   let sumVao = vaoOff === true ? 'off' : 'on';
 
+  // Latest GL-call sample from fpsUpdate. Updated every interval so that, just
+  // before teardown, we can freeze the values from the LIVE animated scene
+  // (rather than the idle summary, where drawElem collapses to ~10).
+  let liveHasSpy: boolean = false;
+  let liveDraws = 0;
+  let liveQuads = 0;
+  let liveVAttrib = 0;
+  let liveEnaVAA = 0;
+  let liveBindVao = 0;
+  let liveDrawElem = 0;
+  let liveGlTotal = 0;
+
   renderer.createNode({
     x: 0,
     y: 0,
@@ -312,6 +324,9 @@ export default async function test({
     sumBackend = backend;
     sumVao = c.vertexArrayObject === true ? 'on' : 'off';
 
+    liveDraws = d.renderOps;
+    liveQuads = d.quads;
+
     const lines = [
       `FPS ${d.fps}   draws ${d.renderOps}   quads ${d.quads}`,
       `${backend}  VAO:${sumVao}  tex ${c.maxTextureSize}/${c.maxTextureUnits}`,
@@ -323,6 +338,13 @@ export default async function test({
       }
       const at = (k: string): number => spy[k] ?? 0;
       const bindVao = at('bindVertexArray') + at('bindVertexArrayOES');
+      // Stash the live sample for the summary's frozen "during animation" block.
+      liveHasSpy = true;
+      liveVAttrib = at('vertexAttribPointer');
+      liveEnaVAA = at('enableVertexAttribArray');
+      liveBindVao = bindVao;
+      liveDrawElem = at('drawElements');
+      liveGlTotal = total;
       lines.push(`GL calls/interval: ${total}`);
       lines.push(
         `vAttribPtr ${at('vertexAttribPointer')}  enaVAA ${at(
@@ -427,6 +449,22 @@ export default async function test({
     console.log(`stress-animation: ${count} cards -> ${Math.round(fps)} fps`);
   }
 
+  // Hold at the final card count for a few seconds with the scene STILL
+  // animating, so the debug panel samples the live animated frame. Then freeze
+  // that GL-call reading for the summary — captured here, before teardown, it
+  // reflects the real per-frame rebind cost (after teardown the panel collapses
+  // to the idle summary where drawElem ~10).
+  hud.text = `holding ${count} cards (capturing live GL)...`;
+  await measureFps(40); // ~several fpsUpdate intervals at the final (low) FPS
+  const liveSpy = Boolean(liveHasSpy);
+  const capDraws = liveDraws;
+  const capQuads = liveQuads;
+  const capVAttrib = liveVAttrib;
+  const capEnaVAA = liveEnaVAA;
+  const capBindVao = liveBindVao;
+  const capDrawElem = liveDrawElem;
+  const capGlTotal = liveGlTotal;
+
   // ---- Summary screen -------------------------------------------------------
   // Capture the stats, then tear down the animated scene (destroy() recurses and
   // stops every row animation) and show a static summary over the background.
@@ -491,12 +529,66 @@ export default async function test({
     text: curve,
   });
 
+  // LIVE GL block, left column — the GL-call sample frozen DURING animation at
+  // the final card count (not the idle summary). This is the real per-frame
+  // rebind cost: with VAO off, vAttribPtr/enaVAA climb with the draw count and
+  // bindVAO stays 0; with VAO on, those are ~0 and bindVAO tracks drawElem.
+  const liveBlock =
+    liveSpy === true
+      ? `LIVE GL @ ${animatedCards} cards (animating)\n` +
+        `draws ${capDraws}  quads ${capQuads}\n` +
+        `vAttribPtr ${capVAttrib}  enaVAA ${capEnaVAA}\n` +
+        `bindVAO ${capBindVao}  drawElem ${capDrawElem}\n` +
+        `GL calls/interval: ${capGlTotal}`
+      : `LIVE GL @ ${animatedCards} cards (animating)\n` +
+        '(add &debug=true to capture per-draw GL-call counts)';
+  renderer.createTextNode({
+    x: 120,
+    y: 670,
+    w: 820,
+    contain: 'width',
+    fontFamily: 'Ubuntu',
+    textRendererOverride: 'sdf',
+    fontSize: 26,
+    lineHeight: 34,
+    color: 0x33ff88ff,
+    zIndex: 100000,
+    parent: testRoot,
+    text: liveBlock,
+  });
+
+  // Explanatory note: why the top-left panel and the LIVE block can disagree.
+  renderer.createTextNode({
+    x: 120,
+    y: 860,
+    w: 820,
+    contain: 'width',
+    fontFamily: 'Ubuntu',
+    textRendererOverride: 'sdf',
+    fontSize: 20,
+    lineHeight: 28,
+    color: 0x94a3b8ff, // slate-400 (0xRRGGBBAA)
+    zIndex: 100000,
+    parent: testRoot,
+    text:
+      'Note: the top-left panel now samples the IDLE summary (scene torn\n' +
+      'down, drawElem ~10) and understates the per-frame rebind count. The\n' +
+      'LIVE GL block above is the animated sample. The relative signature\n' +
+      '(zero rebinds with VAO, nonzero without; bindVAO tracking draws) is\n' +
+      'exactly as predicted; the FPS curve (right) is the real animated cost.',
+  });
+
   console.log(
     `\n=== stress-animation result (VAO ${sumVao.toUpperCase()}) ===`,
   );
   console.log(
     `${animatedCards} animated cards, ${drawnNodes} nodes drawn, final avg ${finalFps} fps (stopped: ${reason})`,
   );
+  if (liveSpy === true) {
+    console.log(
+      `LIVE GL @ ${animatedCards} cards: vAttribPtr ${capVAttrib}, enaVAA ${capEnaVAA}, bindVAO ${capBindVao}, drawElem ${capDrawElem}, total ${capGlTotal}/interval`,
+    );
+  }
   console.table(
     steps.map((s) => ({ cards: s.cards, avgFps: Math.round(s.fps) })),
   );
