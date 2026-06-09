@@ -171,18 +171,90 @@ const loadASTC = async function (view: DataView): Promise<TextureData> {
   };
 };
 
+// Candidate extension name lists, hoisted to module constants so the per-upload
+// resolver returns a shared reference instead of allocating a new array each
+// call (zero GC pressure on the texture-upload path).
+const EXT_ASTC = ['WEBGL_compressed_texture_astc'];
+const EXT_S3TC = ['WEBGL_compressed_texture_s3tc'];
+const EXT_ETC1 = ['WEBGL_compressed_texture_etc1'];
+const EXT_ETC = ['WEBGL_compressed_texture_etc'];
+// WebKit-prefixed name is the legacy fallback.
+const EXT_PVRTC = [
+  'WEBGL_compressed_texture_pvrtc',
+  'WEBKIT_WEBGL_compressed_texture_pvrtc',
+];
+const EXT_NONE: string[] = [];
+
+/**
+ * Resolve the WebGL extension(s) that must be enabled before a given compressed
+ * GL internal format may be used.
+ *
+ * @remarks
+ * `getExtension` is the call that actually enables a compressed format on a
+ * context — until it is called, the format enum is rejected by
+ * `compressedTexImage2D` with `GL_INVALID_ENUM` (1280). Listed in priority
+ * order; the first name the device exposes is used.
+ */
+const requiredExtensionsForFormat = (glInternalFormat: number): string[] => {
+  // ASTC (incl. sRGB variants): 0x93b0–0x93d5
+  if (glInternalFormat >= 0x93b0 && glInternalFormat <= 0x93d5) {
+    return EXT_ASTC;
+  }
+  // S3TC / DXTn: 0x83f0–0x83f3
+  if (glInternalFormat >= 0x83f0 && glInternalFormat <= 0x83f3) {
+    return EXT_S3TC;
+  }
+  // ETC1: 0x8d64
+  if (glInternalFormat === 0x8d64) {
+    return EXT_ETC1;
+  }
+  // ETC2 / EAC: 0x9274–0x9279
+  if (glInternalFormat >= 0x9274 && glInternalFormat <= 0x9279) {
+    return EXT_ETC;
+  }
+  // PVRTC: 0x8c00–0x8c03
+  if (glInternalFormat >= 0x8c00 && glInternalFormat <= 0x8c03) {
+    return EXT_PVRTC;
+  }
+  return EXT_NONE;
+};
+
+/**
+ * Enable the extension owning `glInternalFormat` so the format enum is valid in
+ * `compressedTexImage2D`, throwing a clear error if the device exposes none of
+ * the candidate extensions (instead of leaking a silent `GL_INVALID_ENUM`).
+ */
+const ensureCompressedFormatEnabled = (
+  glw: WebGlContextWrapper,
+  glInternalFormat: number,
+): void => {
+  const names = requiredExtensionsForFormat(glInternalFormat);
+  const len = names.length;
+  if (len === 0) {
+    return;
+  }
+  for (let i = 0; i < len; i++) {
+    if (glw.getExtension(names[i]!) !== null) {
+      return;
+    }
+  }
+  throw new Error(
+    `Compressed texture format 0x${glInternalFormat.toString(
+      16,
+    )} is not supported by this device (requires ${names.join(' or ')})`,
+  );
+};
+
 const uploadASTC = function (
   glw: WebGlContextWrapper,
   texture: WebGLTexture,
   data: CompressedData,
 ) {
-  if (glw.getExtension('WEBGL_compressed_texture_astc') === null) {
-    throw new Error('ASTC compressed textures not supported by this device');
-  }
+  const { glInternalFormat, mipmaps, w, h } = data;
+  ensureCompressedFormatEnabled(glw, glInternalFormat);
 
   glw.bindTexture(texture);
 
-  const { glInternalFormat, mipmaps, w, h } = data;
   if (mipmaps === undefined) {
     return;
   }
@@ -277,6 +349,7 @@ const uploadKTX = function (
   data: CompressedData,
 ) {
   const { glInternalFormat, mipmaps, w: width, h: height, blockInfo } = data;
+  ensureCompressedFormatEnabled(glw, glInternalFormat);
   if (mipmaps === undefined) {
     return;
   }
@@ -415,6 +488,7 @@ const uploadPVR = function (
   data: CompressedData,
 ) {
   const { glInternalFormat, mipmaps, w: width, h: height } = data;
+  ensureCompressedFormatEnabled(glw, glInternalFormat);
   if (mipmaps === undefined) {
     return;
   }
