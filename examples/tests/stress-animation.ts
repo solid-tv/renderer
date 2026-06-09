@@ -9,109 +9,85 @@ import environment from '../assets/robot/environment.png';
 import elevator from '../assets/robot/elevator-background.png';
 
 /**
- * TV animation stress test (FPS + VAO focus).
+ * TV animation stress test (FPS + VAO focus) — "how many moving cards?".
  *
- * Sibling of `stress-tv`, but **dynamic**. `stress-tv` builds a static grid: once
- * built nothing changes per frame, so render is cheap, FPS pins at the panel's
- * vsync (~60), and VAO makes no visible difference. This test continuously
- * animates x/y, so every frame has changing transforms -> nodes go dirty -> they
+ * Sibling of `stress-tv`, but **dynamic**. `stress-tv` builds a static grid:
+ * once built nothing changes per frame, render is cheap, FPS pins at the panel's
+ * vsync (~60), and VAO makes no visible difference. Here the scene is built once
+ * and then **animated with `node.animate()`** — every row container slides its
+ * x/y forever, so every frame has changing transforms -> nodes go dirty -> they
  * are re-uploaded and re-drawn -> the per-draw attribute-binding cost is paid
  * every frame. That is exactly where VAO matters (one `bindVertexArray` per draw
- * vs N x `vertexAttribPointer` + `enableVertexAttribArray`), so here FPS is a
- * meaningful metric and the VAO delta is measurable at high node counts.
+ * vs N x `vertexAttribPointer` + `enableVertexAttribArray`), so FPS is a
+ * meaningful metric and the VAO delta is measurable.
  *
- * Scene: a real TV home screen — a vertical stack of rows (rails), each row a
- * parent node holding a horizontal strip of cards (rounded-rect bg + image
- * thumbnail, optionally an SDF label). Nesting lets us test two distinct costs:
- *   - Row animation:  slide each row container's x. Moving a parent updates the
- *     world transform of all its children (transform-propagation cost) with few
- *     animation drivers.
- *   - Card animation: move each card's x/y individually (more dirty nodes, more
- *     drivers).
+ * What it measures: start with 100 animated cards, then **keep appending more**
+ * (never destroying/recreating what exists) until the sustained FPS falls to the
+ * target (~5 by default). The element count at that point — the most moving cards
+ * the device can drive above the target — is the result, printed on screen and to
+ * the console.
+ *
+ * Scene: a real TV home screen — a vertical stack of rows (rails), each a parent
+ * node holding a horizontal strip of cards (rounded-rect bg + cycled image
+ * thumbnail). Only the **row containers** are animated; their cards ride along via
+ * world-transform propagation. As the row count grows the whole scene is squished
+ * vertically (one `scaleY` on the root) so every card stays on-screen and keeps
+ * costing a draw — no existing card is ever moved or recreated, only new ones are
+ * appended.
  *
  * Run with the live overlay for FPS / draw-call / quad / VAO read-out:
  *   ?test=stress-animation&debug=true
  *
- * A/B the VAO optimization by reloading with and without (it is fixed at
- * renderer construction — you cannot flip it at runtime):
- *   ?test=stress-animation&debug=true&novao=true
- * At a high animated node count, `novao=true` should show LOWER FPS and HIGHER
- * `vertexAttribPointer` / `enableVertexAttribArray` counts than the default,
- * while VAO-on keeps those near zero and `bindVAO` tracks the draw count.
+ * A/B the VAO optimization by reloading with and without (it is fixed at renderer
+ * construction — you cannot flip it at runtime):
+ *   ?test=stress-animation&debug=true            (VAO on  -> more cards @ target)
+ *   ?test=stress-animation&debug=true&novao=true (VAO off -> fewer cards @ target)
+ * With VAO off the overlay's `vertexAttribPointer` / `enableVertexAttribArray`
+ * climb with the draw count and `bindVAO` stays 0; with VAO on those stay ~0 and
+ * `bindVAO` tracks the draw count.
  *
- * Remote controls (arrows + OK only):
- *   Up / Down    : step node count up / down through the ladder (rebuilds scene)
- *   Left / Right : cycle scene tier (rect -> +image -> +image+title)
- *   Enter (OK)   : toggle animation on/off AND switch row-anim vs card-anim
- *                  (off -> row -> card -> off ...)
- *
- * Automatic sweep — find the highest animated node count that still holds the
- * target FPS, for every tier, no remote needed:
- *   ?test=stress-animation&autosweep=true               (default 60 fps target)
- *   ?test=stress-animation&autosweep=true&targetfps=50
- * Sustained animated FPS is the metric (not load time — that is stress-tv's job).
- * Results print to the console (console.table) and to an on-screen panel. A/B the
- * VAO by running once with and once without `&novao=true`.
+ * Tunables (URL params):
+ *   ?targetfps=5   FPS floor that ends the ramp (default 5)
+ *   ?start=100     initial element count (default 100)
+ *   ?multiplier=N  scales the initial count (perfMultiplier)
  */
 
 // Distinct image sources cycled per card so the batcher has to switch textures —
 // that is what makes attribute re-binding (and thus the VAO win) actually show
-// up in the numbers.
+// up in the numbers. Only 6 unique sources, so after the first rows load every
+// later card reuses a cached texture (no upload cost as the scene grows).
 const IMAGES = [lightning, rocko, testscreen, robot, environment, elevator];
-
-// Node-count ladder (total cards). Up/Down move one rung so the whole range is
-// reachable in a handful of remote presses from the couch.
-const COUNT_LADDER = [50, 100, 200, 400, 800, 1200, 1600, 2000];
-
-const TIER_NAMES = ['1: rounded rect only', '2: + image', '3: + image + title'];
-
-// Animation drivers: which transform we churn every frame.
-const ANIM_OFF = 0;
-const ANIM_ROW = 1; // slide each row container's x (few drivers, deep propagation)
-const ANIM_CARD = 2; // move each card's x/y (many drivers, many dirty nodes)
-const ANIM_NAMES = ['off', 'row', 'card'];
 
 const APP_W = 1920;
 const APP_H = 1080;
 
-const randomTitle = (length: number): string => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz';
-  let out = '';
-  for (let i = 0; i < length; i++) {
-    out += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return out;
-};
+// Fixed grid geometry. Cards-per-row is constant; the grid only ever grows
+// downward (more rows), and a single root `scaleY` squishes it to fit the
+// screen. Fixed cell size means appended cards never disturb existing ones.
+const COLS = 16;
+const CELL = APP_W / COLS; // 120
+const GAP = 10;
+const CARD_W = CELL - GAP;
+const CARD_H = CELL - GAP;
+const RADIUS = 12;
 
-// Hard per-frame ceiling of the Uint16 index buffer: 16384 quads, and
-// independently 16384 glyphs. Past it, geometry drops out regardless of FPS —
-// a correctness wall distinct from the performance wall. The auto-sweep clamps
-// to it so it never reports a count whose own text would have vanished.
-const QUAD_CAP = 16384;
-// Glyphs spent on the HUD + debug overlay + results panel — reserved so the
-// sweep's own UI stays inside the cap.
-const RESERVED_GLYPHS = 300;
+// Per-row animation amplitudes (row-local px) and timing.
+const AMP_X = CELL * 0.5;
+const AMP_Y = CELL * 0.25;
+const ANIM_BASE_MS = 1200;
 
-// Main quads per card: rounded-rect background (+ image thumbnail from tier 1).
-const quadsPerCard = (t: number): number => (t >= 1 ? 2 : 1);
-// SDF glyphs per card: ~8 for the title (tier 2+).
-const glyphsPerCard = (t: number): number => (t >= 2 ? 8 : 0);
+// Hard ceiling on how many cards the ramp will create. Well under the Uint16
+// index-buffer limit (16384 quads/frame; each card is 2 quads), so geometry
+// never silently drops.
+const MAX_COUNT = 1000;
 
-// Highest card count for tier `t` that stays under the index-buffer ceiling.
-const correctnessCap = (t: number): number => {
-  const byQuads = Math.floor(QUAD_CAP / quadsPerCard(t));
-  const g = glyphsPerCard(t);
-  const byGlyphs =
-    g > 0 ? Math.floor((QUAD_CAP - RESERVED_GLYPHS) / g) : Infinity;
-  return Math.min(byQuads, byGlyphs);
-};
-
-// Median FPS over `frames` animation frames, discarding a short warm-up so the
-// rebuild spike and first-frame text/texture upload don't skew the result.
+// Median FPS over `frames` animation frames, discarding a short warm-up so a
+// freshly-added batch (animation registration, any first-frame upload) doesn't
+// skew the reading.
 const measureFps = (frames: number): Promise<number> =>
   new Promise((resolve) => {
     const deltas: number[] = [];
-    const warmup = 15;
+    const warmup = 8;
     let seen = 0;
     let last = performance.now();
     const tick = (now: number): void => {
@@ -133,10 +109,10 @@ const measureFps = (frames: number): Promise<number> =>
   });
 
 export async function automation(settings: ExampleSettings) {
-  // A moving scene is non-deterministic, so we snapshot the INITIAL static
-  // layout (animation is left off; `test` builds tier-2, 200 cards) before any
-  // motion starts. Math.random is seeded in automation mode, so the layout is
-  // reproducible.
+  // A moving scene is non-deterministic, so snapshot the INITIAL static layout
+  // (no animation, no growth) before any motion. `test` builds the static start
+  // scene when settings.automation is true. Math.random is unused here so the
+  // layout is fully reproducible.
   await test(settings);
   await waitUntilIdle(settings.renderer);
   await settings.snapshot();
@@ -146,14 +122,18 @@ export default async function test({
   renderer,
   testRoot,
   perfMultiplier,
+  automation,
 }: ExampleSettings) {
   const params = new URLSearchParams(window.location.search);
-  const autosweep = params.get('autosweep') === 'true';
-  const targetFps = Number(params.get('targetfps') ?? 60);
+  const targetFps = Number(params.get('targetfps') ?? 5);
   const vaoOff = params.get('novao') === 'true';
+  const startCount = Math.max(
+    COLS,
+    Math.round(Number(params.get('start') ?? 100) * perfMultiplier),
+  );
 
   // Measure raw capability, not a throttle — otherwise FPS pins at the panel
-  // refresh and the VAO delta is invisible. This is the whole point of the test.
+  // refresh and the ramp never reaches the target. This is the whole point.
   renderer.targetFPS = 0;
 
   renderer.createNode({
@@ -165,8 +145,9 @@ export default async function test({
     parent: testRoot,
   });
 
-  // Container the whole scene hangs off so a rebuild is one destroy + refill.
-  let sceneRoot = renderer.createNode({
+  // Everything hangs off one root so a single `scaleY` squishes the whole grid
+  // to fit the screen as it grows.
+  const sceneRoot = renderer.createNode({
     x: 0,
     y: 0,
     w: APP_W,
@@ -174,377 +155,207 @@ export default async function test({
     parent: testRoot,
   });
 
-  // Row containers (animation drivers in row mode) and the flat card list
-  // (drivers in card mode). Kept as references so destroy()/rebuild is cheap and
-  // the per-frame loop can index them without allocating.
-  let rows: INode[] = [];
-  let cards: INode[] = [];
-  // Pre-allocated base positions, reused every frame to avoid per-frame GC.
-  let rowBaseX = new Float32Array(0);
-  let cardBaseX = new Float32Array(0);
-  let cardBaseY = new Float32Array(0);
-  // Per-build animation amplitudes (px), scaled to the current cell size.
-  let rowAmp = 0;
-  let cardAmpX = 0;
-  let cardAmpY = 0;
-
-  // Hoisted shared shader: radius is recomputed per build, so we hold one
-  // instance and only recreate it when the radius actually changes — never per
-  // card.
-  let roundedRadius = -1;
-  let roundedShader = renderer.createShader('Rounded', {
-    radius: 0,
+  // Hoisted shared rounded-rect shader — one instance for every card (radius is
+  // constant), never created per card.
+  const roundedShader = renderer.createShader('Rounded', {
+    radius: RADIUS,
   }) as CoreShaderNode;
 
-  let ladderIndex = 2; // 200
-  let tier = 1; // +image by default — texture switches are where VAO matters most
-  let animMode = ANIM_OFF; // automation/initial frame is static; toggled with OK
+  // Row containers are the animation drivers. Kept so we can start their
+  // animations after the initial textures have loaded.
+  const rows: INode[] = [];
+  let count = 0; // total cards created
+  let animating = false;
 
-  // Bottom-left so it never collides with the top-left ?debug=true overlay.
   const hud = renderer.createTextNode({
     x: 20,
-    y: APP_H - 150,
+    y: APP_H - 90,
     fontFamily: 'Ubuntu',
     textRendererOverride: 'sdf', // never Canvas here — it re-rasterizes per edit and OOMs TVs
-    fontSize: 22,
+    fontSize: 26,
+    lineHeight: 32,
     color: 0xffffffff,
     text: '',
     zIndex: 1000,
     parent: testRoot,
   });
 
-  const currentCount = (): number => {
-    const base = COUNT_LADDER[ladderIndex]!;
-    return Math.max(1, Math.round(base * perfMultiplier));
+  // Start a row container's perpetual back-and-forth slide. loop:true advances
+  // continuously, so the row (and every card it owns) is dirty every frame.
+  const animateRow = (row: INode, rowIdx: number): void => {
+    const baseY = rowIdx * CELL;
+    row
+      .animate(
+        { x: AMP_X, y: baseY + AMP_Y },
+        {
+          duration: ANIM_BASE_MS + (rowIdx % 6) * 250,
+          delay: (rowIdx % 8) * 80,
+          loop: true,
+          easing: 'ease-in-out',
+        },
+      )
+      .start();
   };
 
-  const updateHud = (): void => {
-    hud.text =
-      `cards ${currentCount()}   tier ${TIER_NAMES[tier]}   anim ${
-        ANIM_NAMES[animMode]
-      }\n` +
-      'Up/Down count   Left/Right tier   OK anim(off/row/card)   (add ?debug=true for FPS/VAO)';
+  // Squish the grid vertically so all rows fit on-screen (and keep drawing) no
+  // matter how many we add. One property on the root — existing cards never move.
+  const fitToScreen = (): void => {
+    const rowCount = rows.length;
+    const totalH = rowCount * CELL;
+    sceneRoot.scaleY = totalH > APP_H ? APP_H / totalH : 1;
   };
 
-  // Speeds (rad/s). Distinct per mode so the motion reads as continuous churn
-  // rather than a synchronized march.
-  const ROW_SPEED = 1.6;
-  const CARD_SPEED = 2.6;
+  // Append `n` cards, creating new row containers as needed. Existing nodes are
+  // never touched — this only ever adds. New rows are animated immediately when
+  // the scene is already animating.
+  const addCards = (n: number): void => {
+    for (let k = 0; k < n; k++) {
+      const i = count;
+      const rowIdx = (i / COLS) | 0;
+      const col = i % COLS;
 
-  // The per-frame animation loop. Zero-allocation: number locals only, indexed
-  // for-loops, every array pre-allocated and reused (CLAUDE.md hot-path rules).
-  // Runs continuously; `animMode === ANIM_OFF` just skips the mutation so the
-  // loop stays alive for toggling.
-  const tick = (now: number): void => {
-    if (animMode === ANIM_OFF) {
-      requestAnimationFrame(tick);
-      return;
-    }
-    const t = now * 0.001; // ms -> s
-    if (animMode === ANIM_ROW) {
-      // Slide each row horizontally. One driver per row; the child cards move
-      // for free via world-transform propagation.
-      for (let i = 0; i < rows.length; i++) {
-        rows[i]!.x = rowBaseX[i]! + rowAmp * Math.sin(t * ROW_SPEED + i * 0.3);
-      }
-    } else {
-      // Move each card on its own x/y. One driver per card -> maximum dirty
-      // nodes and per-draw rebinds.
-      for (let i = 0; i < cards.length; i++) {
-        const phase = i * 0.15;
-        const card = cards[i]!;
-        card.x = cardBaseX[i]! + cardAmpX * Math.sin(t * CARD_SPEED + phase);
-        card.y = cardBaseY[i]! + cardAmpY * Math.cos(t * CARD_SPEED + phase);
-      }
-    }
-    requestAnimationFrame(tick);
-  };
-
-  const buildScene = (count: number): void => {
-    // Tear down the previous scene in one shot — destroy() recurses to children.
-    sceneRoot.destroy();
-    rows = [];
-    cards = [];
-
-    sceneRoot = renderer.createNode({
-      x: 0,
-      y: 0,
-      w: APP_W,
-      h: APP_H,
-      parent: testRoot,
-    });
-
-    // Auto-fit a near-square cell grid across the screen so on-screen fill stays
-    // ~constant regardless of count, and cards stay on-screen under animation
-    // (overscan is small relative to boundsMargin). `cols` is cards-per-row,
-    // `rowCount` is the number of rails.
-    const cols = Math.max(1, Math.ceil(Math.sqrt(count * (APP_W / APP_H))));
-    const rowCount = Math.max(1, Math.ceil(count / cols));
-    const cellW = APP_W / cols;
-    const cellH = APP_H / rowCount;
-    const gap = Math.min(cellW, cellH) * 0.08;
-    const cardW = cellW - gap;
-    const cardH = cellH - gap;
-    const radius = Math.min(24, Math.min(cardW, cardH) * 0.12);
-    const fontSize = Math.max(8, Math.min(28, cardH * 0.16));
-
-    // Recreate the shared rounded shader only when the radius changes.
-    if (radius !== roundedRadius) {
-      roundedRadius = radius;
-      roundedShader = renderer.createShader('Rounded', {
-        radius,
-      }) as CoreShaderNode;
-    }
-
-    // Animation amplitudes scaled to the cell so motion is visible but cards
-    // stay mostly on-screen.
-    rowAmp = Math.min(150, cellW * 0.6);
-    cardAmpX = cellW * 0.15;
-    cardAmpY = cellH * 0.15;
-
-    rowBaseX = new Float32Array(rowCount);
-    cardBaseX = new Float32Array(count);
-    cardBaseY = new Float32Array(count);
-
-    for (let r = 0; r < rowCount; r++) {
-      // Row container: a full-width rail at this vertical slot. Animating its x
-      // slides every card it owns.
-      const rowNode = renderer.createNode<CoreShaderNode>({
-        x: 0,
-        y: r * cellH,
-        w: APP_W,
-        h: cellH,
-        parent: sceneRoot,
-      });
-      rows.push(rowNode);
-      rowBaseX[r] = 0;
-
-      for (let c = 0; c < cols; c++) {
-        const i = r * cols + c;
-        if (i >= count) {
-          break;
-        }
-        // Card positions are relative to the row container.
-        const cx = c * cellW + gap * 0.5;
-        const cy = gap * 0.5;
-        cardBaseX[i] = cx;
-        cardBaseY[i] = cy;
-
-        // Tier 0+: rounded-rectangle card background (shared shader instance).
-        const card = renderer.createNode({
-          x: cx,
-          y: cy,
-          w: cardW,
-          h: cardH,
-          color: 0x1e293bff, // slate-800 (0xRRGGBBAA)
-          shader: roundedShader,
-          parent: rowNode,
+      let row = rows[rowIdx];
+      if (row === undefined) {
+        row = renderer.createNode<CoreShaderNode>({
+          x: 0,
+          y: rowIdx * CELL,
+          w: APP_W,
+          h: CELL,
+          parent: sceneRoot,
         });
-        cards.push(card);
-
-        // Tier 1+: image thumbnail filling most of the card. Cycled sources
-        // force texture switches -> attribute rebinds -> VAO-relevant work.
-        if (tier >= 1) {
-          renderer.createNode({
-            x: gap * 0.5,
-            y: gap * 0.5,
-            w: cardW - gap,
-            h: cardH * 0.6,
-            src: IMAGES[i % IMAGES.length]!,
-            parent: card,
-          });
-        }
-
-        // Tier 2+: SDF title. SDF moves via transform only (no per-frame
-        // re-raster), so it is safe to animate; Canvas text would OOM.
-        if (tier >= 2) {
-          renderer.createTextNode({
-            x: gap,
-            y: cardH * 0.62,
-            fontFamily: 'Ubuntu',
-            textRendererOverride: 'sdf',
-            fontSize,
-            color: 0xffffffff,
-            text: randomTitle(8),
-            parent: card,
-          });
-        }
-      }
-    }
-
-    updateHud();
-    console.log(
-      `stress-animation: ${count} cards, tier ${
-        tier + 1
-      }, ${cols}x${rowCount} grid, anim ${ANIM_NAMES[animMode]}`,
-    );
-  };
-
-  // Drive every tier from low to high and find the highest animated node count
-  // that still holds the target FPS, then bisect for a sharper number.
-  //
-  // Unlike stress-tv (static -> FPS pins at vsync -> load time is the only
-  // signal), this scene is animated, so sustained FPS DOES reveal the limit:
-  // every frame re-uploads the moving transforms and pays the per-draw rebind
-  // cost. That is the cost VAO removes, so the sweep is run twice (with/without
-  // &novao=true) to read the delta.
-  const runAutoSweep = async (target: number): Promise<void> => {
-    interface SweepResult {
-      tier: string;
-      sweetSpot: number;
-      fps: number;
-      limiter: string;
-    }
-    const results: SweepResult[] = [];
-    const ladderMax = COUNT_LADDER[COUNT_LADDER.length - 1]!;
-
-    // Build at `count`, let it settle, then measure sustained animated FPS.
-    const measureAt = async (count: number): Promise<number> => {
-      buildScene(count);
-      await waitUntilIdle(renderer);
-      return await measureFps(40);
-    };
-
-    animMode = ANIM_CARD; // worst case: most drivers, most dirty nodes
-
-    for (let t = 0; t < TIER_NAMES.length; t++) {
-      tier = t;
-      // Never test past the index cap (geometry would drop) OR the ladder max.
-      const cap = correctnessCap(t);
-      const rungs = COUNT_LADDER.filter((c) => c <= cap);
-
-      let lastGood = 0;
-      let lastGoodFps = 0;
-      let firstBad = 0;
-      for (let r = 0; r < rungs.length; r++) {
-        const count = rungs[r]!;
-        hud.text = `auto-sweep - tier ${t + 1}/${
-          TIER_NAMES.length
-        }, measuring ${count} cards...`;
-        const fps = await measureAt(count);
-        console.log(`  tier ${t + 1}  ${count} cards  ${Math.round(fps)} fps`);
-        if (fps >= target) {
-          lastGood = count;
-          lastGoodFps = fps;
-        } else {
-          firstBad = count;
-          break;
+        rows.push(row);
+        if (animating === true) {
+          animateRow(row, rowIdx);
         }
       }
 
-      // Bisect the gap between the last in-target rung and the first below it.
-      let sweet = lastGood;
-      let sweetFps = lastGoodFps;
-      if (firstBad > 0 && firstBad - lastGood > 25) {
-        let lo = lastGood;
-        let hi = firstBad;
-        while (hi - lo > 25) {
-          const mid = (lo + hi) >> 1;
-          const fps = await measureAt(mid);
-          if (fps >= target) {
-            lo = mid;
-            sweetFps = fps;
-          } else {
-            hi = mid;
-          }
-        }
-        sweet = lo;
-      }
-
-      const limiter =
-        firstBad > 0
-          ? `<${target}fps`
-          : cap < ladderMax
-          ? 'index cap'
-          : 'ladder max';
-      results.push({
-        tier: TIER_NAMES[t]!,
-        sweetSpot: sweet,
-        fps: Math.round(sweetFps),
-        limiter,
+      // Card background (shared rounded shader).
+      const card = renderer.createNode({
+        x: col * CELL + GAP * 0.5,
+        y: GAP * 0.5,
+        w: CARD_W,
+        h: CARD_H,
+        color: 0x1e293bff, // slate-800 (0xRRGGBBAA)
+        shader: roundedShader,
+        parent: row,
       });
-    }
 
-    console.log(
-      `\n=== stress-animation sweet spots (target ${target} fps, anim card, VAO ${
-        vaoOff === true ? 'OFF' : 'ON'
-      }) ===`,
-    );
-    console.table(results);
+      // Image thumbnail (cycled source -> texture switches -> VAO-relevant work).
+      renderer.createNode({
+        x: GAP * 0.5,
+        y: GAP * 0.5,
+        w: CARD_W - GAP,
+        h: CARD_H - GAP,
+        src: IMAGES[i % IMAGES.length]!,
+        parent: card,
+      });
 
-    // Render the verdict on screen (small static scene — well under the cap).
-    animMode = ANIM_OFF;
-    sceneRoot.destroy();
-    rows = [];
-    cards = [];
-    hud.text = '';
-    let panel = `SWEET SPOT - holds >=${target}fps (anim card)   VAO ${
-      vaoOff === true ? 'OFF' : 'ON'
-    }\n`;
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i]!;
-      panel += `tier ${i + 1}: ${r.sweetSpot} cards  (${r.fps} fps, ${
-        r.limiter
-      })\n`;
+      count++;
     }
-    panel += 'Re-run with &novao=true to compare VAO off.';
-    renderer.createTextNode({
-      x: 40,
-      y: 60,
-      fontFamily: 'Ubuntu',
-      textRendererOverride: 'sdf',
-      fontSize: 30,
-      lineHeight: 42,
-      color: 0xffffffff,
-      text: panel,
-      parent: testRoot,
-    });
+    fitToScreen();
   };
 
-  if (autosweep === true) {
-    void runAutoSweep(targetFps);
+  // Automation: build the static start scene and stop (no animation, no growth)
+  // so the snapshot is deterministic.
+  if (automation === true) {
+    addCards(startCount);
     return;
   }
 
-  // Kick the animation loop once; it self-reschedules and reads the live arrays
-  // so a rebuild needs no restart.
-  requestAnimationFrame(tick);
-
-  window.addEventListener('keydown', (event) => {
-    const key = event.key;
-
-    if (key === 'ArrowUp') {
-      if (ladderIndex < COUNT_LADDER.length - 1) {
-        ladderIndex++;
-        buildScene(currentCount());
-      }
-      return;
-    }
-    if (key === 'ArrowDown') {
-      if (ladderIndex > 0) {
-        ladderIndex--;
-        buildScene(currentCount());
-      }
-      return;
-    }
-    if (key === 'ArrowRight') {
-      tier = (tier + 1) % TIER_NAMES.length;
-      buildScene(currentCount());
-      return;
-    }
-    if (key === 'ArrowLeft') {
-      tier = (tier + TIER_NAMES.length - 1) % TIER_NAMES.length;
-      buildScene(currentCount());
-      return;
-    }
-    if (key === 'Enter') {
-      // Cycle off -> row -> card -> off. No rebuild needed; the tick reads
-      // animMode and the base positions are already stored.
-      animMode = (animMode + 1) % 3;
-      updateHud();
-      return;
-    }
+  // Always-on FPS counter, top-left, independent of the ?debug=true harness
+  // overlay. A small dark plate keeps it readable over the cards.
+  renderer.createNode({
+    x: 0,
+    y: 0,
+    w: 360,
+    h: 54,
+    color: 0x000000cc,
+    zIndex: 99999,
+    parent: testRoot,
+  });
+  const fpsText = renderer.createTextNode({
+    x: 14,
+    y: 8,
+    fontFamily: 'Ubuntu',
+    textRendererOverride: 'sdf',
+    fontSize: 34,
+    lineHeight: 40,
+    color: 0x33ff88ff,
+    text: 'FPS --',
+    zIndex: 100000,
+    parent: testRoot,
   });
 
-  buildScene(currentCount());
+  // Rolling FPS meter. Runs forever on rAF (independent of the renderer's own
+  // loop) so the counter is live at all times, even while idle. Zero-allocation
+  // hot path: number locals only, no allocations per frame.
+  let fpsFrames = 0;
+  let fpsAccum = 0;
+  let fpsLast = performance.now();
+  const fpsTick = (now: number): void => {
+    fpsFrames++;
+    fpsAccum += now - fpsLast;
+    fpsLast = now;
+    if (fpsAccum >= 500) {
+      fpsText.text = `FPS ${Math.round(
+        (fpsFrames * 1000) / fpsAccum,
+      )}   cards ${count}`;
+      fpsFrames = 0;
+      fpsAccum = 0;
+    }
+    requestAnimationFrame(fpsTick);
+  };
+  requestAnimationFrame(fpsTick);
+
+  const updateHud = (fps: number, done: boolean): void => {
+    const vao = vaoOff === true ? 'off' : 'on';
+    hud.text = done
+      ? `RESULT: ${count} animated cards held >= ${targetFps} fps (VAO ${vao})\n` +
+        'reload with &novao=true to compare VAO off'
+      : `elements ${count}   fps ${Math.round(fps)}   VAO ${vao}\n` +
+        `growing until <= ${targetFps} fps...`;
+  };
+
+  // Build the initial batch static, let its textures load and the renderer go
+  // idle (no animation yet), THEN start animating everything. After this the
+  // scene never idles again (perpetual animations), so the growth loop relies on
+  // measureFps, not idle waits.
+  addCards(startCount);
+  await waitUntilIdle(renderer);
+
+  animating = true;
+  for (let r = 0; r < rows.length; r++) {
+    animateRow(rows[r]!, r);
+  }
+
+  // Ramp: add elements until sustained FPS drops to the target (or we approach
+  // the index-buffer cap). Batch grows ~15% per step so the ramp is geometric
+  // rather than thousands of tiny steps.
+  let fps = await measureFps(20);
+  updateHud(fps, false);
+  console.log(`stress-animation: ${count} cards -> ${Math.round(fps)} fps`);
+
+  while (fps > targetFps && count < MAX_COUNT) {
+    let batch = Math.max(COLS, Math.round(count * 0.15));
+    if (count + batch > MAX_COUNT) {
+      batch = MAX_COUNT - count;
+    }
+    addCards(batch);
+
+    fps = await measureFps(20);
+    updateHud(fps, false);
+    console.log(`stress-animation: ${count} cards -> ${Math.round(fps)} fps`);
+  }
+
+  const reason =
+    count >= MAX_COUNT ? `max ${MAX_COUNT} items` : `fps <= ${targetFps}`;
+  updateHud(fps, true);
+  console.log(
+    `\n=== stress-animation result (VAO ${vaoOff === true ? 'OFF' : 'ON'}) ===`,
+  );
+  console.log(
+    `${count} animated cards sustained ${Math.round(
+      fps,
+    )} fps (stopped: ${reason})`,
+  );
 }
