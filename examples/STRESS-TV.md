@@ -26,7 +26,7 @@ call counts — without it you only get the bottom-left count/tier HUD.
 | Left / Right | cycle scene tier (rect → +image → +text → full card)  |
 | Enter (OK)   | toggle an alpha pulse on every card (per-frame churn) |
 
-Ladder: 50, 100, 200, 400, 800, 1200, 1600, 2000, 3000
+Ladder: 50, 100, 200, 400, 800, 1200, 1600, 2000
 (scaled by `?multiplier=N`).
 
 ## Method
