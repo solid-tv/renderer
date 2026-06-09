@@ -26,7 +26,7 @@ call counts — without it you only get the bottom-left count/tier HUD.
 | Left / Right | cycle scene tier (rect → +image → +text → full card)  |
 | Enter (OK)   | toggle an alpha pulse on every card (per-frame churn) |
 
-Ladder: 50, 100, 200, 400, 800, 1200, 1600, 2000, 3000, 4000
+Ladder: 50, 100, 200, 400, 800, 1200, 1600, 2000, 3000
 (scaled by `?multiplier=N`).
 
 ## Method
@@ -56,7 +56,7 @@ tiers to benefit more than rect-only.
 
 ## Results sheet
 
-Device: ****\_\_**** Backend (overlay line 2): ****\_\_**** Target FPS: \_\_\_\_
+Device: \***\*\_\_\*\*** Backend (overlay line 2): \***\*\_\_\*\*** Target FPS: \_\_\_\_
 
 ### Crossover sweep (res 720, VAO on, full cards / tier 4)
 
