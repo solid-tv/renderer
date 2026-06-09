@@ -1,4 +1,9 @@
-import { type CoreShaderNode, type INode } from '@lightningjs/renderer';
+import {
+  type CoreShaderNode,
+  type FpsUpdatePayload,
+  type INode,
+  type RendererMain,
+} from '@lightningjs/renderer';
 import type { ExampleSettings } from '../common/ExampleSettings.js';
 import { waitUntilIdle } from '../common/utils.js';
 import lightning from '../assets/lightning.png';
@@ -23,9 +28,11 @@ import elevator from '../assets/robot/elevator-background.png';
  *
  * What it measures: start with 100 animated cards, then **keep appending more**
  * (never destroying/recreating what exists) until the sustained FPS falls to the
- * target (~5 by default). The element count at that point — the most moving cards
- * the device can drive above the target — is the result, printed on screen and to
- * the console.
+ * target (10 fps by default, capped at 1000 cards). At that point the ramp stops
+ * and a **summary screen** reports how many cards were animated and how many
+ * nodes were drawn. A live debug panel (top-left) and FPS counter (top-right) are
+ * on the whole time — no ?debug=true needed (though passing it adds the per-draw
+ * GL-call counts that reveal the VAO signature).
  *
  * Scene: a real TV home screen — a vertical stack of rows (rails), each a parent
  * node holding a horizontal strip of cards (rounded-rect bg + cycled image
@@ -47,7 +54,7 @@ import elevator from '../assets/robot/elevator-background.png';
  * `bindVAO` tracks the draw count.
  *
  * Tunables (URL params):
- *   ?targetfps=5   FPS floor that ends the ramp (default 5)
+ *   ?targetfps=10  FPS floor that ends the ramp (default 10)
  *   ?start=100     initial element count (default 100)
  *   ?multiplier=N  scales the initial count (perfMultiplier)
  */
@@ -125,7 +132,7 @@ export default async function test({
   automation,
 }: ExampleSettings) {
   const params = new URLSearchParams(window.location.search);
-  const targetFps = Number(params.get('targetfps') ?? 5);
+  const targetFps = Number(params.get('targetfps') ?? 10);
   const vaoOff = params.get('novao') === 'true';
   const startCount = Math.max(
     COLS,
@@ -262,24 +269,95 @@ export default async function test({
     return;
   }
 
-  // Always-on FPS counter, top-left, independent of the ?debug=true harness
-  // overlay. A small dark plate keeps it readable over the cards.
+  // ---- Always-on debug panel (top-left) -------------------------------------
+  // The harness ?debug=true overlay is only created AFTER this function returns
+  // (i.e. at the very end of the ramp). Build our own so it is live the whole
+  // time. fpsUpdate only fires when the stage has an update interval, so enable
+  // it at runtime. The per-draw GL-call counts need a context spy, which is only
+  // wired at construction — pass ?debug=true to also get those.
+  renderer.stage.options.fpsUpdateInterval = 500;
+
+  let sumBackend = 'webgl';
+  let sumVao = vaoOff === true ? 'off' : 'on';
+
   renderer.createNode({
     x: 0,
     y: 0,
-    w: 360,
-    h: 54,
+    w: 600,
+    h: 172,
+    color: 0x000000cc,
+    zIndex: 99999,
+    parent: testRoot,
+  });
+  const dbgText = renderer.createTextNode({
+    x: 14,
+    y: 10,
+    w: 580,
+    contain: 'width',
+    fontFamily: 'Ubuntu',
+    textRendererOverride: 'sdf',
+    fontSize: 26,
+    lineHeight: 30,
+    color: 0x33ff88ff,
+    text: 'debug: waiting for fpsUpdate...',
+    zIndex: 100000,
+    parent: testRoot,
+  });
+
+  renderer.on('fpsUpdate', (_t: RendererMain, d: FpsUpdatePayload) => {
+    const c = d.capabilities;
+    const spy = d.contextSpyData;
+    const backend =
+      c.renderMode === 'webgl' ? `webgl${c.webGlVersion ?? ''}` : c.renderMode;
+    sumBackend = backend;
+    sumVao = c.vertexArrayObject === true ? 'on' : 'off';
+
+    const lines = [
+      `FPS ${d.fps}   draws ${d.renderOps}   quads ${d.quads}`,
+      `${backend}  VAO:${sumVao}  tex ${c.maxTextureSize}/${c.maxTextureUnits}`,
+    ];
+    if (spy !== null) {
+      let total = 0;
+      for (const key in spy) {
+        total += spy[key]!;
+      }
+      const at = (k: string): number => spy[k] ?? 0;
+      const bindVao = at('bindVertexArray') + at('bindVertexArrayOES');
+      lines.push(`GL calls/interval: ${total}`);
+      lines.push(
+        `vAttribPtr ${at('vertexAttribPointer')}  enaVAA ${at(
+          'enableVertexAttribArray',
+        )}`,
+      );
+      lines.push(
+        `bindVAO ${bindVao}  drawElem ${at('drawElements')}  prog ${at(
+          'useProgram',
+        )}`,
+      );
+    } else {
+      lines.push('GL counts: add &debug=true');
+    }
+    dbgText.text = lines.join('\n');
+  });
+
+  // ---- FPS counter (top-RIGHT edge) -----------------------------------------
+  const FPS_W = 250;
+  renderer.createNode({
+    x: APP_W - FPS_W,
+    y: 0,
+    w: FPS_W,
+    h: 86,
     color: 0x000000cc,
     zIndex: 99999,
     parent: testRoot,
   });
   const fpsText = renderer.createTextNode({
-    x: 14,
+    x: APP_W - FPS_W + 16,
     y: 8,
     fontFamily: 'Ubuntu',
     textRendererOverride: 'sdf',
-    fontSize: 34,
-    lineHeight: 40,
+    fontSize: 32,
+    lineHeight: 38,
     color: 0x33ff88ff,
     text: 'FPS --',
     zIndex: 100000,
@@ -299,7 +377,7 @@ export default async function test({
     if (fpsAccum >= 500) {
       fpsText.text = `FPS ${Math.round(
         (fpsFrames * 1000) / fpsAccum,
-      )}   cards ${count}`;
+      )}\ncards ${count}`;
       fpsFrames = 0;
       fpsAccum = 0;
     }
@@ -307,13 +385,11 @@ export default async function test({
   };
   requestAnimationFrame(fpsTick);
 
-  const updateHud = (fps: number, done: boolean): void => {
-    const vao = vaoOff === true ? 'off' : 'on';
-    hud.text = done
-      ? `RESULT: ${count} animated cards held >= ${targetFps} fps (VAO ${vao})\n` +
-        'reload with &novao=true to compare VAO off'
-      : `elements ${count}   fps ${Math.round(fps)}   VAO ${vao}\n` +
-        `growing until <= ${targetFps} fps...`;
+  const updateHud = (fps: number): void => {
+    hud.text =
+      `elements ${count}   fps ${Math.round(fps)}   VAO ${
+        vaoOff === true ? 'off' : 'on'
+      }\n` + `growing until <= ${targetFps} fps...`;
   };
 
   // Build the initial batch static, let its textures load and the renderer go
@@ -332,7 +408,7 @@ export default async function test({
   // the index-buffer cap). Batch grows ~15% per step so the ramp is geometric
   // rather than thousands of tiny steps.
   let fps = await measureFps(20);
-  updateHud(fps, false);
+  updateHud(fps);
   console.log(`stress-animation: ${count} cards -> ${Math.round(fps)} fps`);
 
   while (fps > targetFps && count < MAX_COUNT) {
@@ -343,19 +419,52 @@ export default async function test({
     addCards(batch);
 
     fps = await measureFps(20);
-    updateHud(fps, false);
+    updateHud(fps);
     console.log(`stress-animation: ${count} cards -> ${Math.round(fps)} fps`);
   }
 
+  // ---- Summary screen -------------------------------------------------------
+  // Capture the stats, then tear down the animated scene (destroy() recurses and
+  // stops every row animation) and show a static summary over the background.
   const reason =
-    count >= MAX_COUNT ? `max ${MAX_COUNT} items` : `fps <= ${targetFps}`;
-  updateHud(fps, true);
+    count >= MAX_COUNT
+      ? `hit ${MAX_COUNT}-card cap`
+      : `FPS fell to ${targetFps}`;
+  const finalFps = Math.round(fps);
+  const animatedCards = count; // every card moves (rides its animated row)
+  const drawnNodes = count * 2; // rounded bg + thumbnail per card
+  const animatedRows = rows.length; // animation drivers
+  const sceneNodes = rows.length + count * 2; // + row containers (not drawn)
+
+  sceneRoot.destroy();
+  hud.text = '';
+
+  renderer.createTextNode({
+    x: 120,
+    y: 260,
+    w: APP_W - 240,
+    contain: 'width',
+    fontFamily: 'Ubuntu',
+    textRendererOverride: 'sdf',
+    fontSize: 44,
+    lineHeight: 66,
+    color: 0xffffffff,
+    zIndex: 100000,
+    parent: testRoot,
+    text:
+      `TEST COMPLETE\n\n` +
+      `Stopped: ${reason}  (sustained FPS ${finalFps})\n\n` +
+      `Cards animated:    ${animatedCards}\n` +
+      `Nodes drawn:       ${drawnNodes}   (bg + thumbnail / card)\n` +
+      `Animated rows:     ${animatedRows}   (drivers; every card moves)\n` +
+      `Scene-graph nodes: ${sceneNodes}\n` +
+      `Backend / VAO:     ${sumBackend} / ${sumVao}`,
+  });
+
   console.log(
-    `\n=== stress-animation result (VAO ${vaoOff === true ? 'OFF' : 'ON'}) ===`,
+    `\n=== stress-animation result (VAO ${sumVao.toUpperCase()}) ===`,
   );
   console.log(
-    `${count} animated cards sustained ${Math.round(
-      fps,
-    )} fps (stopped: ${reason})`,
+    `${animatedCards} animated cards, ${drawnNodes} nodes drawn, sustained down to ${finalFps} fps (stopped: ${reason})`,
   );
 }
