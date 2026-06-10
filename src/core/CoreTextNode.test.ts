@@ -29,6 +29,7 @@ const defaultProps = (
   colorTop: 0xffffffff,
   colorTr: 0xffffffff,
   placeholderColor: 0,
+  placeholderImage: null,
   h: 0,
   mount: 0,
   mountX: 0,

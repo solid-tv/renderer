@@ -471,12 +471,18 @@ export class WebGlRenderer extends CoreRenderer {
     }
 
     const props = node.props;
-    // While a placeholder is showing, the quad samples the shared 1x1 white
-    // texture tinted by the node's premultiplied placeholder color.
-    let tx =
-      node.placeholderActive === true
-        ? this.stage.defaultTexture!
-        : props.texture || this.stage.defaultTexture!;
+    // While a placeholder is showing, the quad samples the node's loaded
+    // placeholder image, or the shared 1x1 white texture tinted by the
+    // node's premultiplied placeholder color.
+    let tx;
+    if (node.placeholderActive === true) {
+      tx =
+        node.placeholderTextureLoaded === true
+          ? node.placeholderTexture!
+          : this.stage.defaultTexture!;
+    } else {
+      tx = props.texture || this.stage.defaultTexture!;
+    }
 
     if (tx.type === TextureType.subTexture) {
       tx = (tx as SubTexture).parentTexture;
@@ -535,7 +541,12 @@ export class WebGlRenderer extends CoreRenderer {
       }
 
       const rc = node.renderCoords!;
-      const tc = node.textureCoords || this.defaultTextureCoords;
+      // node.textureCoords belongs to the main texture (resizeMode, flips) —
+      // a placeholder must sample its full texture.
+      const tc =
+        node.placeholderActive === true
+          ? this.defaultTextureCoords
+          : node.textureCoords || this.defaultTextureCoords;
 
       const cTl = node.premultipliedColorTl;
       const cTr = node.premultipliedColorTr;
