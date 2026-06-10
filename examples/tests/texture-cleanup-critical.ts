@@ -51,6 +51,10 @@ See docs/ManualRegressionTests.md for more information.
     fontSize: 40,
   });
 
+  // textureOptions must be replaced wholesale, never mutated in place —
+  // nodes created without options share a frozen default object.
+  screen.textureOptions = { preload: true };
+
   // Create a new random texture every 10ms
   setInterval(() => {
     screen.texture = renderer.createTexture('NoiseTexture', {
@@ -58,6 +62,5 @@ See docs/ManualRegressionTests.md for more information.
       h: 500,
       cacheId: Math.floor(Math.random() * 100000),
     });
-    screen.textureOptions.preload = true;
   }, 100);
 }
