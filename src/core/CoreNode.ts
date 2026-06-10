@@ -410,6 +410,29 @@ export interface CoreNodeProps {
    */
   placeholderColor: number;
   /**
+   * Placeholder image shown while the Node's texture is not yet loaded.
+   *
+   * @remarks
+   * Like {@link placeholderColor}, but renders an image instead of a solid
+   * rectangle while the Node's texture loads (and while a freed texture
+   * reloads, and after a permanent failure). The image is stretched to the
+   * Node's dimensions and renders through the Node's shader, so rounded
+   * corners and borders apply.
+   *
+   * The image is loaded once, shared by every Node using the same URL, and
+   * pinned in memory (`preventCleanup`) so it is always available — use a
+   * small number of distinct placeholder images (e.g. one per poster size),
+   * not per-item artwork.
+   *
+   * While the placeholder image itself is still loading, the Node falls back
+   * to {@link placeholderColor} if set, otherwise renders nothing. Once the
+   * placeholder image is showing it is rendered untinted; `placeholderColor`
+   * only colors the fallback rectangle.
+   *
+   * @default `null`
+   */
+  placeholderImage: string | null;
+  /**
    * The Node's parent Node.
    *
    * @remarks
@@ -811,13 +834,27 @@ export class CoreNode extends EventEmitter {
   public textureLoaded = false;
 
   /**
-   * True while this node should render its `placeholderColor` instead of its
-   * texture: `placeholderColor` is non-zero, a texture is set, and that
-   * texture is not loaded. Read by the renderers' quad path to substitute the
-   * stage's default (1x1 white) texture. Maintained by
+   * True while this node should render a placeholder instead of its texture:
+   * a texture is set, it is not loaded, and a placeholder is available
+   * (non-zero `placeholderColor`, or a loaded `placeholderImage`). Read by
+   * the renderers' quad path to substitute the placeholder texture — the
+   * loaded placeholder image, or the stage's default (1x1 white) texture
+   * tinted by `placeholderColor`. Maintained by
    * {@link updatePlaceholderActive} — never written elsewhere.
    */
   public placeholderActive = false;
+
+  /**
+   * Shared, pinned (`preventCleanup`) texture for {@link placeholderImage},
+   * or `null`. Owned by the placeholderImage setter.
+   */
+  public placeholderTexture: Texture | null = null;
+
+  /**
+   * Cached `placeholderTexture.state === 'loaded'` (avoids per-quad string
+   * compares). Maintained by the placeholder texture event handlers.
+   */
+  public placeholderTextureLoaded = false;
 
   public updateType = UpdateType.All;
   public childUpdateType = UpdateType.None;
@@ -904,7 +941,15 @@ export class CoreNode extends EventEmitter {
     // creates a fresh object with a consistent shape.  Save fields that are
     // re-applied through setters, then null them on props so the setters
     // detect the change.
-    const { texture, shader, src, rtt, boundsMargin, parent } = props;
+    const {
+      texture,
+      shader,
+      src,
+      rtt,
+      boundsMargin,
+      parent,
+      placeholderImage,
+    } = props;
     const p = (this.props = props);
     p.texture = null;
     p.shader = null;
@@ -912,6 +957,7 @@ export class CoreNode extends EventEmitter {
     p.rtt = false;
     p.boundsMargin = null;
     p.scale = null;
+    p.placeholderImage = null;
 
     //check if any color props are set for premultiplied color updates
     if (
@@ -955,6 +1001,9 @@ export class CoreNode extends EventEmitter {
     if (src !== null) {
       this.src = src;
     }
+    if (placeholderImage !== null && placeholderImage !== undefined) {
+      this.placeholderImage = placeholderImage;
+    }
     if (rtt !== false) {
       this.rtt = rtt;
     }
@@ -992,9 +1041,10 @@ export class CoreNode extends EventEmitter {
    */
   private updatePlaceholderActive(): void {
     const active =
-      this.props.placeholderColor !== 0 &&
       this.props.texture !== null &&
-      this.textureLoaded === false;
+      this.textureLoaded === false &&
+      (this.props.placeholderColor !== 0 ||
+        this.placeholderTextureLoaded === true);
 
     if (active !== this.placeholderActive) {
       this.placeholderActive = active;
@@ -1003,6 +1053,94 @@ export class CoreNode extends EventEmitter {
       );
     }
   }
+
+  /**
+   * Assign or clear the shared placeholder image texture.
+   *
+   * @remarks
+   * The texture is pinned (`preventCleanup`) so the memory manager never
+   * frees it, and loaded eagerly with priority so it is available before the
+   * first poster needs it. Listeners stay attached for the lifetime of the
+   * assignment: `loaded`/`failed` drive the fallback state machine, and
+   * `freed` self-heals the rare out-of-band free (context loss, or another
+   * node's textureOptions unpinning the shared texture) by re-pinning and
+   * reloading. They are removed on swap and in {@link destroy} so a
+   * destroyed node does not leak via the long-lived texture.
+   */
+  private setPlaceholderTexture(value: Texture | null): void {
+    const old = this.placeholderTexture;
+    if (old === value) {
+      return;
+    }
+
+    if (old !== null) {
+      old.off('loaded', this.onPlaceholderTexLoaded);
+      old.off('failed', this.onPlaceholderTexFailed);
+      old.off('freed', this.onPlaceholderTexFreed);
+    }
+
+    this.placeholderTexture = value;
+    this.placeholderTextureLoaded = value !== null && value.state === 'loaded';
+
+    if (value !== null) {
+      value.preventCleanup = true;
+      value.on('loaded', this.onPlaceholderTexLoaded);
+      value.on('failed', this.onPlaceholderTexFailed);
+      value.on('freed', this.onPlaceholderTexFreed);
+
+      // Eager priority load. Only from idle states — 'loading'/'fetching'
+      // means another node already kicked it off and a duplicate call would
+      // start a second fetch of the same source.
+      const state = value.state;
+      if (state === 'initial' || state === 'freed') {
+        void this.stage.txManager.loadTexture(value, true);
+      }
+    }
+
+    this.updatePlaceholderActive();
+    // The shown placeholder may have changed shape (image <-> color rect)
+    // without toggling active.
+    if (this.placeholderActive === true) {
+      this.setUpdateType(UpdateType.PremultipliedColors);
+    }
+  }
+
+  private onPlaceholderTexLoaded: TextureLoadedEventHandler = () => {
+    this.placeholderTextureLoaded = true;
+    this.updatePlaceholderActive();
+    if (this.placeholderActive === true) {
+      // Switch from the color-rect fallback to the image: vertex colors go
+      // to untinted white and the quad's texture changes.
+      this.setUpdateType(UpdateType.PremultipliedColors);
+      // The RAF loop may have stopped while the placeholder loaded.
+      this.stage.requestRender();
+    }
+  };
+
+  private onPlaceholderTexFailed: TextureFailedEventHandler = () => {
+    this.placeholderTextureLoaded = false;
+    this.updatePlaceholderActive();
+    if (this.placeholderActive === true) {
+      this.setUpdateType(UpdateType.PremultipliedColors);
+    }
+  };
+
+  private onPlaceholderTexFreed: TextureFreedEventHandler = () => {
+    this.placeholderTextureLoaded = false;
+    this.updatePlaceholderActive();
+    if (this.placeholderActive === true) {
+      this.setUpdateType(UpdateType.PremultipliedColors);
+    }
+
+    // A pinned texture was freed out-of-band — re-pin and reload. The state
+    // guard makes only the first notified node start the reload; the rest
+    // see 'loading'.
+    const texture = this.placeholderTexture;
+    if (texture !== null && texture.state === 'freed') {
+      texture.preventCleanup = true;
+      void this.stage.txManager.loadTexture(texture, true);
+    }
+  };
 
   loadTexture(): void {
     if (this.props.texture === null) {
@@ -1485,10 +1623,15 @@ export class CoreNode extends EventEmitter {
       const alpha = this.worldAlpha;
 
       if (this.placeholderActive === true) {
-        // Placeholder rendering: all four corners take the placeholder color.
-        // The quad samples the stage's default 1x1 white texture, so this is
-        // exactly the color-rect path.
-        const merged = premultiplyColorABGR(props.placeholderColor, alpha);
+        // Placeholder rendering: all four corners take the same color. With
+        // the placeholder image loaded, the image renders untinted (white);
+        // otherwise the quad samples the stage's default 1x1 white texture
+        // tinted by placeholderColor — exactly the color-rect path.
+        const color =
+          this.placeholderTextureLoaded === true
+            ? 0xffffffff
+            : props.placeholderColor;
+        const merged = premultiplyColorABGR(color, alpha);
         this.premultipliedColorTl =
           this.premultipliedColorTr =
           this.premultipliedColorBl =
@@ -2085,6 +2228,9 @@ export class CoreNode extends EventEmitter {
 
     this.removeAllListeners();
     this.unloadTexture();
+    // Detach from the long-lived, shared placeholder texture so it does not
+    // retain this node's handlers (the texture itself stays pinned/cached).
+    this.setPlaceholderTexture(null);
     this.isRenderable = false;
 
     if (this.hasShaderTimeFn === true) {
@@ -2129,6 +2275,9 @@ export class CoreNode extends EventEmitter {
 
   get renderTexture(): Texture | null {
     if (this.placeholderActive === true) {
+      if (this.placeholderTextureLoaded === true) {
+        return this.placeholderTexture;
+      }
       return this.stage.defaultTexture;
     }
     return this.props.texture || this.stage.defaultTexture;
@@ -2616,6 +2765,28 @@ export class CoreNode extends EventEmitter {
     if (this.placeholderActive === true) {
       this.setUpdateType(UpdateType.PremultipliedColors);
     }
+  }
+
+  get placeholderImage(): string | null {
+    return this.props.placeholderImage;
+  }
+
+  set placeholderImage(value: string | null) {
+    const p = this.props;
+    if (p.placeholderImage === value) return;
+
+    p.placeholderImage = value;
+
+    if (value === null) {
+      this.setPlaceholderTexture(null);
+      return;
+    }
+
+    // src-only props: every node using the same URL — regardless of node
+    // dimensions — resolves to the same cached, shared texture instance.
+    this.setPlaceholderTexture(
+      this.stage.txManager.createTexture('ImageTexture', { src: value }),
+    );
   }
 
   get colorTop(): number {

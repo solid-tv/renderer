@@ -26,6 +26,7 @@ describe('set color()', () => {
     colorTop: 0,
     colorTr: 0,
     placeholderColor: 0,
+    placeholderImage: null,
     h: 0,
     mount: 0,
     mountX: 0,
@@ -1461,6 +1462,278 @@ describe('set color()', () => {
 
       expect(node.placeholderActive).toBe(false);
       expect(node.renderTexture).toBe(texture);
+    });
+  });
+
+  describe('placeholderImage', () => {
+    // The placeholderImage setter resolves URLs through txManager, so this
+    // suite uses a stage mock with an explicit txManager stub.
+    function placeholderStage() {
+      const createTexture = vi.fn();
+      const loadTexture = vi.fn();
+      const stage = mock<Stage>({
+        strictBound: createBound(0, 0, 200, 200),
+        preloadBound: createBound(0, 0, 200, 200),
+        defaultTexture: {
+          state: 'loaded',
+        },
+        renderer: mock<CoreRenderer>() as CoreRenderer,
+        txManager: {
+          createTexture,
+          loadTexture,
+        } as unknown as Stage['txManager'],
+      });
+      return { stage, createTexture, loadTexture };
+    }
+
+    function emittingTexture(state: string): ImageTexture & {
+      emit: (event: string, data?: unknown) => void;
+      preventCleanup: boolean;
+    } {
+      return Object.assign(new EventEmitter(), {
+        state,
+        preventCleanup: false,
+        retryCount: 0,
+        maxRetryCount: 1,
+        dimensions: { w: 100, h: 100 },
+        setRenderableOwner: vi.fn(),
+      }) as unknown as ImageTexture & {
+        emit: (event: string, data?: unknown) => void;
+        preventCleanup: boolean;
+      };
+    }
+
+    function visibleNode(stage: Stage): CoreNode {
+      const parent = new CoreNode(stage, defaultProps());
+      parent.globalTransform = Matrix3d.identity();
+      parent.worldAlpha = 1;
+
+      const node = new CoreNode(stage, defaultProps({ parent }));
+      node.alpha = 1;
+      node.x = 0;
+      node.y = 0;
+      node.w = 100;
+      node.h = 100;
+      return node;
+    }
+
+    it('pins and eagerly loads the placeholder image on assignment', () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+
+      expect(createTexture).toHaveBeenCalledWith('ImageTexture', {
+        src: 'placeholder-poster.png',
+      });
+      expect(placeholder.preventCleanup).toBe(true);
+      expect(loadTexture).toHaveBeenCalledWith(placeholder, true);
+      expect(node.placeholderTextureLoaded).toBe(false);
+    });
+
+    it('uses an already-loaded shared placeholder immediately, untinted', () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+
+      expect(loadTexture).not.toHaveBeenCalled();
+      expect(node.placeholderActive).toBe(true);
+      expect(node.isRenderable).toBe(true);
+      expect(node.renderTexture).toBe(placeholder);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0xffffffff, 1),
+      );
+    });
+
+    it('falls back to the placeholderColor rect until the image loads', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+      node.placeholderColor = 0x336699ff;
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+
+      expect(node.renderTexture).toBe(stage.defaultTexture);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0x336699ff, 1),
+      );
+
+      (placeholder as { state: string }).state = 'loaded';
+      placeholder.emit('loaded', { w: 100, h: 100 });
+      node.update(1, clippingRect);
+
+      expect(node.renderTexture).toBe(placeholder);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0xffffffff, 1),
+      );
+    });
+
+    it('renders nothing until an image-only placeholder loads', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+      expect(node.isRenderable).toBe(false);
+
+      (placeholder as { state: string }).state = 'loaded';
+      placeholder.emit('loaded', { w: 100, h: 100 });
+      node.update(1, clippingRect);
+
+      expect(node.isRenderable).toBe(true);
+      expect(node.renderTexture).toBe(placeholder);
+    });
+
+    it('the loaded main texture wins over the placeholder', async () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+      node.color = 0xffffffff;
+
+      node.placeholderImage = 'placeholder-poster.png';
+      const main = emittingTexture('initial');
+      node.texture = main;
+      node.update(0, clippingRect);
+      expect(node.renderTexture).toBe(placeholder);
+
+      await Promise.resolve(); // flush loadTextureTask so listeners attach
+      (main as { state: string }).state = 'loaded';
+      main.emit('loaded', { w: 100, h: 100 });
+      node.update(1, clippingRect);
+
+      expect(node.placeholderActive).toBe(false);
+      expect(node.renderTexture).toBe(main);
+    });
+
+    it('shows the placeholder image again while a freed main texture reloads', async () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      const main = emittingTexture('initial');
+      node.texture = main;
+      node.update(0, clippingRect);
+
+      await Promise.resolve();
+      (main as { state: string }).state = 'loaded';
+      main.emit('loaded', { w: 100, h: 100 });
+      node.update(1, clippingRect);
+      expect(node.placeholderActive).toBe(false);
+
+      (main as { state: string }).state = 'freed';
+      main.emit('freed');
+      node.update(2, clippingRect);
+
+      expect(node.placeholderActive).toBe(true);
+      expect(node.renderTexture).toBe(placeholder);
+    });
+
+    it('a failed placeholder image falls back to the color rect', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+      node.placeholderColor = 0x336699ff;
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+
+      (placeholder as { state: string }).state = 'failed';
+      placeholder.emit('failed', new Error('404'));
+      node.update(1, clippingRect);
+
+      expect(node.placeholderTextureLoaded).toBe(false);
+      expect(node.isRenderable).toBe(true);
+      expect(node.renderTexture).toBe(stage.defaultTexture);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0x336699ff, 1),
+      );
+    });
+
+    it('self-heals an out-of-band freed placeholder: re-pins and reloads', () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      expect(node.placeholderTextureLoaded).toBe(true);
+
+      // e.g. context loss, or another node's textureOptions unpinned it
+      placeholder.preventCleanup = false;
+      (placeholder as { state: string }).state = 'freed';
+      placeholder.emit('freed');
+
+      expect(node.placeholderTextureLoaded).toBe(false);
+      expect(placeholder.preventCleanup).toBe(true);
+      expect(loadTexture).toHaveBeenCalledWith(placeholder, true);
+    });
+
+    it('destroy detaches the node from the shared placeholder texture', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      expect(placeholder.hasListeners()).toBe(true);
+
+      node.destroy();
+
+      expect(placeholder.hasListeners()).toBe(false);
+    });
+
+    it('swapping placeholderImage moves listeners to the new texture', () => {
+      const { stage, createTexture } = placeholderStage();
+      const first = emittingTexture('initial');
+      const second = emittingTexture('initial');
+      createTexture.mockReturnValueOnce(first).mockReturnValueOnce(second);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-a.png';
+      expect(first.hasListeners()).toBe(true);
+
+      node.placeholderImage = 'placeholder-b.png';
+
+      expect(first.hasListeners()).toBe(false);
+      expect(second.hasListeners()).toBe(true);
+      expect(node.placeholderTexture).toBe(second);
+    });
+
+    it('clearing placeholderImage detaches and deactivates', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+      expect(node.placeholderActive).toBe(true);
+
+      node.placeholderImage = null;
+      node.update(1, clippingRect);
+
+      expect(placeholder.hasListeners()).toBe(false);
+      expect(node.placeholderActive).toBe(false);
+      expect(node.isRenderable).toBe(false);
     });
   });
 });
