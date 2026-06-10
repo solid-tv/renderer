@@ -72,12 +72,14 @@ export class Character {
     const nextFrame = () => {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       this.node.texture = this.rightFrames[curI]!;
-      this.node.textureOptions.flipX = flipX;
       curI++;
       if (curI > iEnd) {
         curI = iStart;
       }
     };
+    // textureOptions must be replaced wholesale, never mutated in place —
+    // nodes created without options share a frozen default object.
+    this.node.textureOptions = { flipX };
     nextFrame();
     this.curIntervalAnimation = setInterval(nextFrame, intervalMs);
   }
