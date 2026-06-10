@@ -205,11 +205,20 @@ export class TextureMemoryManager {
   }
 
   /**
-   * Destroy a texture and remove it from the memory manager
+   * Destroy a texture, evict its cache entry, and remove it from the memory
+   * manager.
+   *
+   * @remarks
+   * Private on purpose: `destroy()` calls `removeAllListeners()`, so running
+   * this on a texture that still has subscribers severs a live `CoreNode`'s
+   * (or `SubTexture`'s) connection — the blank-poster bug. The only safe
+   * entry point is {@link evictOrphanedTextures}, which proves the texture
+   * is unreferenced first. For memory pressure use {@link freeTexture},
+   * which is reversible.
    *
    * @param texture - The texture to destroy
    */
-  destroyTexture(texture: Texture) {
+  private destroyTexture(texture: Texture) {
     if (this.debugLogging === true) {
       console.log(
         `[TextureMemoryManager] Destroying texture. State: ${texture.state}`,
