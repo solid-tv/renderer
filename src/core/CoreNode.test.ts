@@ -1735,5 +1735,69 @@ describe('set color()', () => {
       expect(node.placeholderActive).toBe(false);
       expect(node.isRenderable).toBe(false);
     });
+
+    it('many nodes share one placeholder texture and transition independently', async () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      // Mimic the real loadTexture: setState('loading') happens synchronously
+      // before the first await, which is what dedupes subsequent callers.
+      loadTexture.mockImplementation(() => {
+        (placeholder as { state: string }).state = 'loading';
+      });
+
+      const a = visibleNode(stage);
+      const b = visibleNode(stage);
+      const c = visibleNode(stage);
+      a.placeholderImage = 'placeholder-poster.png';
+      b.placeholderImage = 'placeholder-poster.png';
+      c.placeholderImage = 'placeholder-poster.png';
+
+      // One shared instance, one fetch.
+      expect(a.placeholderTexture).toBe(placeholder);
+      expect(b.placeholderTexture).toBe(placeholder);
+      expect(c.placeholderTexture).toBe(placeholder);
+      expect(loadTexture).toHaveBeenCalledTimes(1);
+
+      const mainA = emittingTexture('initial');
+      const mainB = emittingTexture('initial');
+      const mainC = emittingTexture('initial');
+      a.texture = mainA;
+      b.texture = mainB;
+      c.texture = mainC;
+
+      // The shared placeholder loads: every node is notified and shows it.
+      (placeholder as { state: string }).state = 'loaded';
+      placeholder.emit('loaded', { w: 100, h: 100 });
+      a.update(0, clippingRect);
+      b.update(0, clippingRect);
+      c.update(0, clippingRect);
+      expect(a.renderTexture).toBe(placeholder);
+      expect(b.renderTexture).toBe(placeholder);
+      expect(c.renderTexture).toBe(placeholder);
+
+      // Node A's poster arrives — A switches, B and C keep the placeholder.
+      await Promise.resolve(); // flush loadTextureTask so main listeners attach
+      (mainA as { state: string }).state = 'loaded';
+      mainA.emit('loaded', { w: 100, h: 100 });
+      a.update(1, clippingRect);
+      b.update(1, clippingRect);
+      expect(a.placeholderActive).toBe(false);
+      expect(a.renderTexture).toBe(mainA);
+      expect(b.renderTexture).toBe(placeholder);
+      expect(c.renderTexture).toBe(placeholder);
+
+      // Node B is destroyed mid-load — C is unaffected and the texture only
+      // loses B's listeners.
+      b.destroy();
+      expect(placeholder.hasListeners()).toBe(true);
+      expect(c.renderTexture).toBe(placeholder);
+
+      // C's poster arrives last.
+      (mainC as { state: string }).state = 'loaded';
+      mainC.emit('loaded', { w: 100, h: 100 });
+      c.update(2, clippingRect);
+      expect(c.renderTexture).toBe(mainC);
+    });
   });
 });
