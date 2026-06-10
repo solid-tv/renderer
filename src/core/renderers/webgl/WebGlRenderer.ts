@@ -175,6 +175,23 @@ export class WebGlRenderer extends CoreRenderer {
    */
   lastUploadedBufferSize = 0;
   /**
+   * Set when this frame's CPU-side SDF buffer content may differ from what
+   * render() last uploaded to the GPU. The cache-hit text path
+   * (addSdfCachedQuads) writes byte-identical data at identical offsets as
+   * long as the render list order and every text node's layout / transform /
+   * color / alpha are unchanged, so a frame where only that path ran (and the
+   * used size matches the last upload) can skip the per-frame bufferData of
+   * the entire SDF buffer. Any cache-miss write (addSdfQuads), render list
+   * rebuild (ordering), RTT pass (RTT glyphs occupy the front of the shared
+   * buffer), or buffer growth sets this flag and forces an upload.
+   */
+  sdfBufferChanged = true;
+  /**
+   * Float32 element count of the last SDF upload performed by render().
+   * -1 forces the first upload.
+   */
+  lastSdfUploadSize = -1;
+  /**
    * Count of main-scene nodes whose quad data changed this frame and which
    * own a buffer slot. Accumulated for free during the addQuad pass (which
    * already branches on isQuadDirty) and consumed in render() to choose
@@ -712,6 +729,9 @@ export class WebGlRenderer extends CoreRenderer {
       return;
     }
 
+    // Cache-miss write: this frame's SDF bytes differ from the last upload.
+    this.sdfBufferChanged = true;
+
     let idx = this.sdfBufferIdx;
     this.ensureSdfBufferCapacity(idx + glyphCount * 24);
 
@@ -958,6 +978,9 @@ export class WebGlRenderer extends CoreRenderer {
       return;
     }
 
+    // Backing store is being replaced; never skip the next upload.
+    this.sdfBufferChanged = true;
+
     let newCapacity = this.fSdfBuffer.length * 2;
     while (newCapacity < requiredSize) {
       newCapacity *= 2;
@@ -1050,12 +1073,20 @@ export class WebGlRenderer extends CoreRenderer {
       glw.arrayBufferData(buffer, arr, glw.STATIC_DRAW);
     }
 
-    // Upload the shared SDF buffer if any SDF glyphs were written this frame.
+    // Upload the shared SDF buffer if any SDF glyphs were written this frame
+    // AND the content can differ from what the GPU already holds. On frames
+    // where every text node took the cache-hit path (addSdfCachedQuads), the
+    // rewrite produced byte-identical data at identical offsets, so the
+    // (potentially multi-hundred-KB) bufferData is skipped entirely.
     if (this.sdfBufferIdx > 0) {
-      const sdfBuf =
-        this.sdfQuadBufferCollection.getBuffer('a_position') || null;
-      const sdfArr = new Float32Array(this.sdfBuffer, 0, this.sdfBufferIdx);
-      glw.arrayBufferData(sdfBuf, sdfArr, glw.DYNAMIC_DRAW);
+      if (this.shouldUploadSdfBuffer() === true) {
+        const sdfBuf =
+          this.sdfQuadBufferCollection.getBuffer('a_position') || null;
+        const sdfArr = new Float32Array(this.sdfBuffer, 0, this.sdfBufferIdx);
+        glw.arrayBufferData(sdfBuf, sdfArr, glw.DYNAMIC_DRAW);
+        this.lastSdfUploadSize = this.sdfBufferIdx;
+      }
+      this.sdfBufferChanged = false;
     }
 
     for (let i = 0, length = this.renderOps.length; i < length; i++) {
@@ -1068,6 +1099,21 @@ export class WebGlRenderer extends CoreRenderer {
     // Calculate the size of each quad in bytes (4 vertices per quad) times the size of each vertex in bytes
     const QUAD_SIZE_IN_BYTES = 4 * (5 * BYTES_PER_ELEMENT); // 5 attributes per vertex
     this.numQuadsRendered = this.quadBufferUsage / QUAD_SIZE_IN_BYTES;
+  }
+
+  /**
+   * Whether render() must re-upload the SDF vertex buffer this frame.
+   *
+   * Skipping is safe only when no cache-miss write occurred
+   * (sdfBufferChanged false) and the used size matches the last upload —
+   * a size mismatch means the set of contributing text nodes changed even
+   * if every individual write was a cache hit.
+   */
+  shouldUploadSdfBuffer(): boolean {
+    if (this.sdfBufferChanged === true) {
+      return true;
+    }
+    return this.sdfBufferIdx !== this.lastSdfUploadSize;
   }
 
   getQuadCount(): number {
@@ -1165,6 +1211,10 @@ export class WebGlRenderer extends CoreRenderer {
 
   renderRTTNodes() {
     const { glw } = this;
+
+    // RTT passes share the SDF buffer (their glyphs land at the front of it),
+    // so the main pass cannot assume the GPU copy still matches.
+    this.sdfBufferChanged = true;
 
     // Save main scene buffer index so RTT rendering doesn't interfere
     // with the dirty quad buffer optimization.
@@ -1469,6 +1519,11 @@ export class WebGlRenderer extends CoreRenderer {
    * next addQuad() pass will reassign compact, contiguous slots starting from 0.
    */
   override invalidateQuadBuffer(): void {
+    // A structural render list change reorders SDF writes too, so the GPU
+    // SDF buffer can no longer be assumed current. Applies regardless of
+    // the quad-slot mode below.
+    this.sdfBufferChanged = true;
+
     if (!DIRTY_QUAD_BUFFER) {
       return;
     }
