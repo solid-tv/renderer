@@ -36,7 +36,9 @@ export function createAnimation(
         target: props[
           key as keyof Omit<CoreNodeAnimateProps, 'shaderProps'>
         ] as number,
-        isColor: key.indexOf('color') !== -1,
+        // Matches 'color', 'colorTl', ... and camelCase props like
+        // 'placeholderColor' so they interpolate in color space.
+        isColor: key.indexOf('color') !== -1 || key.indexOf('Color') !== -1,
       };
     } else if (key === 'shaderProps' && node.shader !== null) {
       if (!shaderPropValues) shaderPropValues = {};
