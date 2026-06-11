@@ -1499,7 +1499,7 @@ describe('set color()', () => {
       return node;
     }
 
-    it('default off: a margin-ring node is renderable (current behavior)', () => {
+    it('off: a margin-ring node is renderable (legacy behavior)', () => {
       const node = loadedTextureNode(boundsStage(false), 250);
 
       node.update(0, clippingRect);

@@ -214,7 +214,7 @@ export class Stage {
     setBaselineMode(options.textBaselineMode);
 
     this.platform = platform;
-    this.renderOnlyInViewport = options.renderOnlyInViewport === true;
+    this.renderOnlyInViewport = options.renderOnlyInViewport !== false;
 
     this.startTime = platform.getTimeStamp();
 

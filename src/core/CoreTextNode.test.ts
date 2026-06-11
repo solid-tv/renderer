@@ -178,7 +178,7 @@ describe('CoreTextNode (sdf) renderOnlyInViewport', () => {
     return node;
   }
 
-  it('default off: margin-ring SDF text is renderable', () => {
+  it('off: margin-ring SDF text is renderable (legacy behavior)', () => {
     const node = sdfNodeWithLayout(false);
     node.renderState = CoreNodeRenderState.InBounds;
 

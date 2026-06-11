@@ -300,22 +300,23 @@ export interface RendererRuntimeSettings {
    * Only submit quads for Nodes that intersect the visible viewport.
    *
    * @remarks
-   * By default, Nodes inside the bounds margin (`boundsMargin`) but outside
-   * the visible viewport are fully rendered — their quads are written,
-   * batched, and drawn every frame, with the GPU clipping away the invisible
-   * fragments. That keeps render-list membership stable ahead of scrolling at
-   * the cost of per-frame CPU for the off-screen ring.
+   * Nodes inside the bounds margin (`boundsMargin`) but outside the visible
+   * viewport still update and still load their textures (the margin remains
+   * the preload runway), but they stay out of the render list until they
+   * actually intersect the viewport — no quad writes, texture binds, or draw
+   * calls for content the GPU would clip anyway.
    *
-   * With this enabled, Nodes in the margin ring still update and still load
-   * their textures (the margin remains the preload runway), but they stay out
-   * of the render list until they actually intersect the viewport — no quad
-   * writes, texture binds, or draw calls for clipped content.
+   * Set to `false` to restore the previous behavior, where margin-ring Nodes
+   * are fully rendered every frame and clipped by the GPU. That keeps
+   * render-list membership stable ahead of scrolling at the cost of
+   * per-frame CPU for the off-screen ring.
    *
-   * Trade-offs: the `renderable` event and autosize patching fire at
-   * viewport entry instead of margin entry, and render-list rebuilds move to
-   * the visible edge (same frequency, different timing).
+   * Trade-offs when enabled: the `renderable` event and autosize patching
+   * fire at viewport entry instead of margin entry, render-list rebuilds
+   * move to the visible edge (same frequency, different timing), and
+   * margin-ring content inside RTT subtrees is skipped.
    *
-   * @defaultValue `false`
+   * @defaultValue `true`
    */
   renderOnlyInViewport: boolean;
 
@@ -745,7 +746,7 @@ export class RendererMain extends EventEmitter {
       appHeight: settings.appHeight || 1080,
       textureMemory: resolvedTxSettings,
       boundsMargin: settings.boundsMargin || 0,
-      renderOnlyInViewport: settings.renderOnlyInViewport ?? false,
+      renderOnlyInViewport: settings.renderOnlyInViewport ?? true,
       deviceLogicalPixelRatio: settings.deviceLogicalPixelRatio || 1,
       devicePhysicalPixelRatio:
         settings.devicePhysicalPixelRatio || this.windowDevicePixelRatio() || 1,

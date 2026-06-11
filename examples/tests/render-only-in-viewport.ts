@@ -9,10 +9,10 @@ import type { ExampleSettings } from '../common/ExampleSettings.js';
  * beyond it. Open with `?test=render-only-in-viewport&debug=true` and
  * compare the overlay's `draws`/`quads` counters:
  *
- * - `&strictrender=false` (gate off): margin-ring quads are submitted and
- *   GPU-clipped — they count.
- * - default (gate on): margin-ring quads stay out of the render list —
- *   `quads` drops by the ring count, pixels identical.
+ * - `&strictrender=false` (gate off, legacy behavior): margin-ring quads are
+ *   submitted and GPU-clipped — they count.
+ * - default (gate on, the renderer default): margin-ring quads stay out of
+ *   the render list — `quads` drops by the ring count, pixels identical.
  *
  * No `automation` export on purpose: the feature changes no pixels, so there
  * is nothing for the snapshot suite to capture — behavior is asserted by the
