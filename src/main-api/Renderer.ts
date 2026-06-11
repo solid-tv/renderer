@@ -297,6 +297,29 @@ export interface RendererRuntimeSettings {
   boundsMargin: number | [number, number, number, number];
 
   /**
+   * Only submit quads for Nodes that intersect the visible viewport.
+   *
+   * @remarks
+   * By default, Nodes inside the bounds margin (`boundsMargin`) but outside
+   * the visible viewport are fully rendered — their quads are written,
+   * batched, and drawn every frame, with the GPU clipping away the invisible
+   * fragments. That keeps render-list membership stable ahead of scrolling at
+   * the cost of per-frame CPU for the off-screen ring.
+   *
+   * With this enabled, Nodes in the margin ring still update and still load
+   * their textures (the margin remains the preload runway), but they stay out
+   * of the render list until they actually intersect the viewport — no quad
+   * writes, texture binds, or draw calls for clipped content.
+   *
+   * Trade-offs: the `renderable` event and autosize patching fire at
+   * viewport entry instead of margin entry, and render-list rebuilds move to
+   * the visible edge (same frequency, different timing).
+   *
+   * @defaultValue `false`
+   */
+  renderOnlyInViewport: boolean;
+
+  /**
    * Factor to convert app-authored logical coorindates to device logical coordinates
    *
    * @remarks
@@ -722,6 +745,7 @@ export class RendererMain extends EventEmitter {
       appHeight: settings.appHeight || 1080,
       textureMemory: resolvedTxSettings,
       boundsMargin: settings.boundsMargin || 0,
+      renderOnlyInViewport: settings.renderOnlyInViewport ?? false,
       deviceLogicalPixelRatio: settings.deviceLogicalPixelRatio || 1,
       devicePhysicalPixelRatio:
         settings.devicePhysicalPixelRatio || this.windowDevicePixelRatio() || 1,
@@ -791,6 +815,7 @@ export class RendererMain extends EventEmitter {
       appWidth,
       appHeight,
       boundsMargin: settings.boundsMargin!,
+      renderOnlyInViewport: settings.renderOnlyInViewport!,
       clearColor: settings.clearColor!,
       canvas: this.canvas,
       deviceLogicalPixelRatio,
