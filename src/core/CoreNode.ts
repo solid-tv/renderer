@@ -259,7 +259,12 @@ export interface CoreNodeProps {
    * Normally `worldAlpha = parent.worldAlpha * alpha`, so fading a parent
    * fades every descendant with it. With `ignoreParentAlpha` enabled this
    * Node keeps rendering at its own alpha while its parent (and the rest of
-   * the subtree) fades — including when the parent's alpha reaches 0.
+   * the subtree) fades.
+   *
+   * Subtrees whose world alpha reaches exactly 0 are culled from rendering
+   * entirely, so this Node still disappears once an ancestor hits alpha 0 —
+   * the prop only has an effect while every ancestor's alpha is above 0.
+   * This keeps the fully-transparent subtree cull free of bookkeeping.
    *
    * Descendants of this Node inherit from its world alpha as usual.
    *
@@ -886,17 +891,6 @@ export class CoreNode extends EventEmitter {
   public _globalIsTranslate = true;
 
   public worldAlpha = 1;
-  /**
-   * Number of nodes in this subtree (this node included) with
-   * {@link CoreNodeProps.ignoreParentAlpha} enabled.
-   *
-   * @remarks
-   * Maintained on the cold paths (prop setter, attach/detach) so the
-   * render-list `worldAlpha === 0` subtree cull can keep traversing into
-   * faded subtrees that still contain visible nodes, at the cost of a single
-   * extra comparison that only evaluates for fully transparent nodes.
-   */
-  public ignoreParentAlphaCount = 0;
   public premultipliedColorTl = 0;
   public premultipliedColorTr = 0;
   public premultipliedColorBl = 0;
@@ -936,11 +930,6 @@ export class CoreNode extends EventEmitter {
     // detect the change.
     const { texture, shader, src, rtt, boundsMargin, parent } = props;
     const p = (this.props = props);
-    // Must be set before the parent.addChild() below so the subtree count
-    // propagates to ancestors on attach.
-    if (p.ignoreParentAlpha === true) {
-      this.ignoreParentAlphaCount = 1;
-    }
     p.texture = null;
     p.shader = null;
     p.src = null;
@@ -2222,23 +2211,7 @@ export class CoreNode extends EventEmitter {
     this.stage.requestRenderListUpdate();
   }
 
-  /**
-   * Adds `delta` to the `ignoreParentAlphaCount` of this node and every
-   * ancestor up to the root.
-   */
-  adjustIgnoreParentAlphaCount(delta: number): void {
-    this.ignoreParentAlphaCount += delta;
-    let node: CoreNode | null = this.props.parent;
-    while (node !== null) {
-      node.ignoreParentAlphaCount += delta;
-      node = node.props.parent;
-    }
-  }
-
   removeChild(node: CoreNode, targetParent: CoreNode | null = null) {
-    if (node.ignoreParentAlphaCount !== 0) {
-      this.adjustIgnoreParentAlphaCount(-node.ignoreParentAlphaCount);
-    }
     if (targetParent === null) {
       if (
         USE_RTT &&
@@ -2260,9 +2233,6 @@ export class CoreNode extends EventEmitter {
   }
 
   addChild(node: CoreNode, previousParent: CoreNode | null = null) {
-    if (node.ignoreParentAlphaCount !== 0) {
-      this.adjustIgnoreParentAlphaCount(node.ignoreParentAlphaCount);
-    }
     const inRttCluster =
       USE_RTT &&
       (this.props.rtt === true || this.parentHasRenderTexture === true);
@@ -2589,7 +2559,6 @@ export class CoreNode extends EventEmitter {
       return;
     }
     this.props.ignoreParentAlpha = value;
-    this.adjustIgnoreParentAlphaCount(value === true ? 1 : -1);
     this.setUpdateType(
       UpdateType.PremultipliedColors |
         UpdateType.WorldAlpha |

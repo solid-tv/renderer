@@ -49,14 +49,15 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     parent: fadedParent,
   });
 
-  // 2. Parent at alpha 0: normal child is invisible,
-  //    ignoreParentAlpha child remains fully visible
+  // 2. Parent at alpha 0.05: normal child is nearly invisible,
+  //    ignoreParentAlpha child remains fully visible. (At alpha exactly 0
+  //    the whole subtree is culled from rendering, by design.)
   const invisibleParent = renderer.createNode({
     x: 700,
     y: 40,
     w: 560,
     h: 200,
-    alpha: 0,
+    alpha: 0.05,
     parent: testRoot,
   });
   renderer.createNode({

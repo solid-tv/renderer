@@ -294,8 +294,8 @@ describe('set color()', () => {
       expect(node.worldAlpha).toBe(0.8);
     });
 
-    it('stays renderable when the parent world alpha is 0', () => {
-      const parent = makeParent(0);
+    it('keeps its own world alpha while the parent fades toward 0', () => {
+      const parent = makeParent(0.01);
       const node = new CoreNode(
         stage,
         defaultProps({ parent, alpha: 1, ignoreParentAlpha: true }),
@@ -350,34 +350,6 @@ describe('set color()', () => {
       node.ignoreParentAlpha = false;
 
       expect(node.updateType).toBe(updateTypeBefore);
-    });
-
-    it('maintains ancestor subtree counts through attach, toggle, and detach', () => {
-      const root = makeParent(1);
-      const mid = new CoreNode(stage, defaultProps({ parent: root }));
-      const leaf = new CoreNode(
-        stage,
-        defaultProps({ parent: mid, ignoreParentAlpha: true }),
-      );
-
-      // Construction with the prop set propagates up the chain
-      expect(leaf.ignoreParentAlphaCount).toBe(1);
-      expect(mid.ignoreParentAlphaCount).toBe(1);
-      expect(root.ignoreParentAlphaCount).toBe(1);
-
-      // Toggling off clears the chain
-      leaf.ignoreParentAlpha = false;
-      expect(leaf.ignoreParentAlphaCount).toBe(0);
-      expect(mid.ignoreParentAlphaCount).toBe(0);
-      expect(root.ignoreParentAlphaCount).toBe(0);
-
-      // Reparenting moves the count from the old chain to the new one
-      leaf.ignoreParentAlpha = true;
-      const otherRoot = makeParent(1);
-      leaf.parent = otherRoot;
-      expect(mid.ignoreParentAlphaCount).toBe(0);
-      expect(root.ignoreParentAlphaCount).toBe(0);
-      expect(otherRoot.ignoreParentAlphaCount).toBe(1);
     });
 
     it('descendants inherit the node world alpha as usual', () => {

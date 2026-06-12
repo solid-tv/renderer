@@ -754,10 +754,9 @@ export class Stage {
     for (let i = 0; i < len; i++) {
       const child = children[i] as CoreNode;
 
-      // Skip invisible subtrees — unless a descendant ignores parent alpha
-      // and may still be visible inside the faded subtree
+      // Skip invisible subtrees
       if (
-        (child.worldAlpha === 0 && child.ignoreParentAlphaCount === 0) ||
+        child.worldAlpha === 0 ||
         child.renderState === CoreNodeRenderState.OutOfBounds
       ) {
         continue;
