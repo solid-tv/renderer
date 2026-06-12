@@ -379,6 +379,7 @@ export class Stage {
       w: appWidth,
       h: appHeight,
       alpha: 1,
+      ignoreParentAlpha: false,
       autosize: false,
       boundsMargin: null,
       clipping: false,
@@ -753,9 +754,10 @@ export class Stage {
     for (let i = 0; i < len; i++) {
       const child = children[i] as CoreNode;
 
-      // Skip invisible subtrees
+      // Skip invisible subtrees — unless a descendant ignores parent alpha
+      // and may still be visible inside the faded subtree
       if (
-        child.worldAlpha === 0 ||
+        (child.worldAlpha === 0 && child.ignoreParentAlphaCount === 0) ||
         child.renderState === CoreNodeRenderState.OutOfBounds
       ) {
         continue;
@@ -1039,6 +1041,7 @@ export class Stage {
       w: props.w ?? 0,
       h: props.h ?? 0,
       alpha: props.alpha ?? 1,
+      ignoreParentAlpha: props.ignoreParentAlpha ?? false,
       autosize: props.autosize ?? false,
       boundsMargin: props.boundsMargin ?? null,
       clipping: props.clipping ?? false,
