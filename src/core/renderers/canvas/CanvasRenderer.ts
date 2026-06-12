@@ -260,6 +260,26 @@ export class CanvasRenderer extends CoreRenderer {
     }
   }
 
+  /**
+   * Renders a node's content (texture or color rect) into an arbitrary 2D
+   * context instead of the main canvas. Used by shaders that need to
+   * composite the node's content offscreen (e.g. EdgeFade alpha masks).
+   *
+   * The content is drawn at the node's global position — the caller is
+   * responsible for setting a transform on `target` that maps it to the
+   * desired location.
+   */
+  renderNodeContent(node: CoreNode, target: CanvasRenderingContext2D): void {
+    let texture = node.props.texture;
+    if (node.placeholderActive === true || texture === null) {
+      texture = this.stage.defaultTexture as Texture;
+    }
+    const prev = this.context;
+    this.context = target;
+    this.renderContext(node, texture);
+    this.context = prev;
+  }
+
   createShaderNode(
     shaderKey: string,
     shaderType: Readonly<CanvasShaderType>,
