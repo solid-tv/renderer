@@ -595,11 +595,16 @@ export class Stage {
     // Process some textures asynchronously but don't block the frame
     // Use a background task to prevent frame drops
     if (this.txManager.hasUpdates() === true) {
-      const timeLimit = hasActiveAnimations
-        ? this.options.textureProcessingTimeLimit / 2
-        : this.options.textureProcessingTimeLimit;
+      // While animating, upload at most one texture per frame so uploads don't
+      // steal time from the animation; otherwise fill the per-frame time budget.
+      const processing =
+        hasActiveAnimations === true
+          ? this.txManager.processOne()
+          : this.txManager.processUntil(
+              this.options.textureProcessingTimeLimit,
+            );
 
-      this.txManager.processSome(timeLimit).catch((err) => {
+      processing.catch((err) => {
         console.error('Error processing textures:', err);
       });
     }
