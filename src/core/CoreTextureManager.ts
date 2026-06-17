@@ -409,9 +409,9 @@ export class CoreTextureManager extends EventEmitter {
 
     // Anything that arrived before initialization completed is now safe to
     // process. Without this, queued textures would sit until the next frame
-    // tick happens to drain them.
+    // tick happens to call processSome().
     if (this.uploadTextureQueue.size > 0) {
-      this.processUntil(Infinity).catch((err) => {
+      this.processSome(Infinity).catch((err) => {
         console.error('Failed to drain pre-init texture queue:', err);
       });
     }
@@ -587,41 +587,11 @@ export class CoreTextureManager extends EventEmitter {
   }
 
   /**
-   * Upload a single queued texture to the GPU.
+   * Process a limited number of uploads.
    *
-   * @remarks
-   * Used while animations are running so uploads don't steal time from the
-   * animation. If the dequeued texture already died (failed/freed), nothing is
-   * uploaded this frame and the next call handles the following one.
+   * @param maxProcessingTime - The maximum processing time in milliseconds
    */
-  async processOne(): Promise<void> {
-    if (this.initialized === false) {
-      return;
-    }
-
-    const texture = this.uploadTextureQueue.shift();
-    if (texture === undefined) {
-      return;
-    }
-
-    await this.uploadQueued(texture);
-  }
-
-  /**
-   * Upload queued textures to the GPU until the per-frame time budget runs out.
-   *
-   * @remarks
-   * Called once per frame when idle. Textures are uploaded one-by-one; after
-   * each, the elapsed time is rechecked and processing stops once it exceeds
-   * `maxProcessingTime`, leaving the rest queued for the next frame.
-   *
-   * In normal operation a queued texture's data is already decoded
-   * (`loadTexture` awaits `getTextureData` before enqueuing), so this budgets
-   * GPU upload time. Pass `Infinity` to drain the whole queue.
-   *
-   * @param maxProcessingTime - The time budget for this frame, in milliseconds
-   */
-  async processUntil(maxProcessingTime: number): Promise<void> {
+  async processSome(maxProcessingTime: number): Promise<void> {
     if (this.initialized === false) {
       return;
     }
@@ -629,54 +599,79 @@ export class CoreTextureManager extends EventEmitter {
     const platform = this.platform;
     const startTime = platform.getTimeStamp();
 
-    while (platform.getTimeStamp() - startTime < maxProcessingTime) {
-      const texture = this.uploadTextureQueue.shift();
-      if (texture === undefined) {
-        // Queue drained.
-        break;
+    // Decode / fetch ("getTextureData") is IO-bound and parallelisable across
+    // image workers, while GPU upload is effectively serial. Keep a small
+    // sliding window of in-flight data fetches so the next decode runs while
+    // we're uploading the current one.
+    const prefetchLimit = Math.max(1, this.numImageWorkers);
+    const pending: Array<{ texture: Texture; data: Promise<unknown> }> = [];
+
+    // Helper avoids TS narrowing `texture.state` permanently after the first
+    // discriminated check — the property is mutable and can transition across
+    // awaits, so we need to re-read it freshly each time.
+    const isDead = (texture: Texture): boolean =>
+      texture.state === 'failed' || texture.state === 'freed';
+
+    const fillPrefetch = () => {
+      while (pending.length < prefetchLimit) {
+        const texture = this.uploadTextureQueue.shift();
+        if (texture === undefined) break;
+
+        if (isDead(texture)) {
+          continue;
+        }
+
+        // Swallow the rejection here so an early failure doesn't surface as
+        // an unhandled promise rejection while it sits in the prefetch
+        // window; we re-check state after awaiting.
+        const data =
+          texture.textureData === null
+            ? texture.getTextureData().catch((err) => {
+                console.error('Failed to fetch texture data:', err);
+                return null;
+              })
+            : Promise.resolve(texture.textureData);
+
+        pending.push({ texture, data });
+      }
+    };
+
+    fillPrefetch();
+
+    while (
+      pending.length > 0 &&
+      platform.getTimeStamp() - startTime < maxProcessingTime
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const next = pending.shift()!;
+      // Top up the prefetch window before awaiting — the next decode starts
+      // now and overlaps with this upload.
+      fillPrefetch();
+
+      if (isDead(next.texture)) {
+        continue;
       }
 
-      await this.uploadQueued(texture);
-    }
-  }
-
-  /**
-   * Decode (if needed) and upload a single already-dequeued texture.
-   *
-   * @remarks
-   * Shared by {@link processOne} and {@link processUntil}. Dead (failed/freed)
-   * textures and upload failures are skipped without throwing.
-   */
-  private async uploadQueued(texture: Texture): Promise<void> {
-    if (this.isTextureDead(texture)) {
-      return;
-    }
-
-    try {
-      if (texture.textureData === null) {
-        await texture.getTextureData();
+      try {
+        await next.data;
+        if (isDead(next.texture)) {
+          continue;
+        }
+        await this.uploadTexture(next.texture);
+      } catch (error) {
+        console.error('Failed to upload texture:', error);
+        // Continue with next texture instead of stopping entire queue
       }
-      if (this.isTextureDead(texture)) {
-        return;
-      }
-      await this.uploadTexture(texture);
-    } catch (error) {
-      console.error('Failed to upload texture:', error);
-      // Skip this texture instead of stalling the queue.
     }
-  }
 
-  /**
-   * A texture is "dead" once it has failed or been freed — both terminal for
-   * the upload pipeline.
-   *
-   * @remarks
-   * Kept as a method rather than an inline check so TypeScript doesn't
-   * permanently narrow `state` after the first comparison: the property is
-   * mutable and can transition across the awaits in {@link uploadQueued}.
-   */
-  private isTextureDead(texture: Texture): boolean {
-    return texture.state === 'failed' || texture.state === 'freed';
+    // Time ran out before we got to these. Put them back so we don't lose
+    // them — their getTextureData() is already in flight and will populate
+    // `textureData` for the next tick.
+    for (const { texture } of pending) {
+      if (!isDead(texture)) {
+        this.uploadTextureQueue.add(texture);
+      }
+    }
   }
 
   public hasUpdates(): boolean {

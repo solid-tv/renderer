@@ -97,12 +97,6 @@ export class Stage {
   public readonly renderer: CoreRenderer;
   public readonly root: CoreNode;
   public boundsMargin: [number, number, number, number];
-  /**
-   * When true, nodes inside the bounds margin but outside the viewport keep
-   * loading textures yet stay out of the render list. Read by
-   * `CoreNode.updateIsRenderable` on the scroll path.
-   */
-  public readonly renderOnlyInViewport: boolean;
   public readonly defShaderNode: CoreShaderNode | null = null;
   public strictBound: Bound;
   public preloadBound: Bound;
@@ -214,7 +208,6 @@ export class Stage {
     setBaselineMode(options.textBaselineMode);
 
     this.platform = platform;
-    this.renderOnlyInViewport = options.renderOnlyInViewport !== false;
 
     this.startTime = platform.getTimeStamp();
 
@@ -379,7 +372,6 @@ export class Stage {
       w: appWidth,
       h: appHeight,
       alpha: 1,
-      ignoreParentAlpha: false,
       autosize: false,
       boundsMargin: null,
       clipping: false,
@@ -391,6 +383,8 @@ export class Stage {
       colorTl: 0x00000000,
       colorTr: 0x00000000,
       placeholderColor: 0x00000000,
+      placeholderImage: null,
+      fallbackImage: null,
       colorBl: 0x00000000,
       colorBr: 0x00000000,
       zIndex: 0,
@@ -595,16 +589,11 @@ export class Stage {
     // Process some textures asynchronously but don't block the frame
     // Use a background task to prevent frame drops
     if (this.txManager.hasUpdates() === true) {
-      // While animating, upload at most one texture per frame so uploads don't
-      // steal time from the animation; otherwise fill the per-frame time budget.
-      const processing =
-        hasActiveAnimations === true
-          ? this.txManager.processOne()
-          : this.txManager.processUntil(
-              this.options.textureProcessingTimeLimit,
-            );
+      const timeLimit = hasActiveAnimations
+        ? this.options.textureProcessingTimeLimit / 2
+        : this.options.textureProcessingTimeLimit;
 
-      processing.catch((err) => {
+      this.txManager.processSome(timeLimit).catch((err) => {
         console.error('Error processing textures:', err);
       });
     }
@@ -1045,7 +1034,6 @@ export class Stage {
       w: props.w ?? 0,
       h: props.h ?? 0,
       alpha: props.alpha ?? 1,
-      ignoreParentAlpha: props.ignoreParentAlpha ?? false,
       autosize: props.autosize ?? false,
       boundsMargin: props.boundsMargin ?? null,
       clipping: props.clipping ?? false,
@@ -1059,6 +1047,8 @@ export class Stage {
       colorBl,
       colorBr,
       placeholderColor: props.placeholderColor ?? 0,
+      placeholderImage: props.placeholderImage ?? null,
+      fallbackImage: props.fallbackImage ?? null,
       zIndex: props.zIndex ?? 0,
       parent: props.parent ?? null,
       texture: props.texture ?? null,
