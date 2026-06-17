@@ -85,9 +85,38 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
 
     this.setUpdateType(UpdateType.All);
 
-    if (this.fontHandler.isFontLoaded(props.fontFamily)) {
-      this.generateLayout();
+    // Eagerly measure the text dimensions at construction (when the font is
+    // already loaded) so layout consumers can read the node's real w/h before
+    // it is rendered. This computes layout only — the actual rasterization /
+    // glyph upload stays on update()'s visibility-gated path, exactly as
+    // before, so off-screen text still does no render work. Measuring is cheap
+    // and emits no `loaded` event, so it runs synchronously here.
+    if (this.fontHandler.isFontLoaded(props.fontFamily) === true) {
+      this.generateDimensions();
     }
+  }
+
+  /**
+   * Measure the text and apply its dimensions to the node without rendering.
+   *
+   * Sets w/h from the renderer's measure-only path and flags the
+   * dimension-dependent updates, but leaves `_layoutGenerated` false so
+   * update() still runs the full (deferred, visibility-gated) render later.
+   */
+  private generateDimensions(): void {
+    const info = this.textRenderer.measureText(this.textProps);
+    if (info.width === this.props.w && info.height === this.props.h) {
+      return;
+    }
+    this.props.w = info.width;
+    this.props.h = info.height;
+    this._renderInfo = info;
+    // Direct props.w/h writes bypass the w/h setters, so raise RecalcUniforms
+    // (dimensions feed shader uniforms) alongside Local/RenderBounds — mirrors
+    // handleRenderResult.
+    this.setUpdateType(
+      UpdateType.Local | UpdateType.RenderBounds | UpdateType.RecalcUniforms,
+    );
   }
 
   protected override onTextureLoaded: TextureLoadedEventHandler = (
@@ -196,7 +225,12 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
   }
 
   /**
-   * Override CoreNode's update method to handle text-specific updates
+   * Generate the text layout for the current props.
+   *
+   * If the font is already loaded the layout is produced and `_layoutGenerated`
+   * is latched so `update()` won't redo it. If the font is not yet loaded the
+   * node registers with the font handler and the layout is produced on a later
+   * frame, once the load promise resolves.
    */
   private generateLayout(): void {
     if (this.fontHandler.isFontLoaded(this.textProps.fontFamily)) {
@@ -211,8 +245,14 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
     }
   }
 
+  /**
+   * Override CoreNode's update method to handle text-specific updates
+   */
   override update(delta: number, parentClippingRect: RectWithValid): void {
-    if ((this.textProps.forceLoad || this.allowTextGeneration()) && !this._layoutGenerated) {
+    if (
+      (this.textProps.forceLoad || this.allowTextGeneration()) &&
+      !this._layoutGenerated
+    ) {
       this.generateLayout();
     }
 

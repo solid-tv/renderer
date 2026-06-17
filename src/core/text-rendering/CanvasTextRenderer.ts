@@ -84,6 +84,53 @@ const init = (stage: Stage): void => {
 };
 
 /**
+ * Measure-only path: lay out the text via the layout engine and return its
+ * dimensions, without rasterizing. Used to populate a text node's w/h eagerly
+ * at construction.
+ *
+ * Kept as a standalone function (rather than a helper shared with
+ * {@link renderText}) so renderText stays byte-identical to upstream — the
+ * mapTextLayout invocation below is intentionally a mirror of the one in
+ * renderText and must be kept in sync with it. See {@link TextRenderer.measureText}.
+ */
+const measureText = (props: CoreTextNodeProps): TextRenderInfo => {
+  assertTruthy(measureContext, 'Canvas measureContext is not available');
+
+  if (props.text.length === 0) {
+    return {
+      width: 0,
+      height: 0,
+    };
+  }
+
+  const { fontFamily, fontStyle, fontSize } = props;
+  measureContext.font = `${fontStyle} ${fontSize}px Unknown, ${fontFamily}`;
+  measureContext.textBaseline = 'alphabetic';
+
+  const metrics = CanvasFontHandler.getFontMetrics(fontFamily, fontSize);
+
+  const [, , , , , effectiveWidth, effectiveHeight] = mapTextLayout(
+    CanvasFontHandler.measureText,
+    metrics,
+    props.text,
+    props.textAlign,
+    fontFamily,
+    props.lineHeight,
+    props.overflowSuffix,
+    props.wordBreak,
+    props.letterSpacing,
+    props.maxLines,
+    props.maxWidth,
+    props.maxHeight,
+  );
+
+  return {
+    width: effectiveWidth,
+    height: effectiveHeight,
+  };
+};
+
+/**
  * Canvas text renderer
  *
  * @param stage - Stage instance for font resolution
@@ -273,6 +320,7 @@ const CanvasTextRenderer = {
   type,
   font,
   renderText,
+  measureText,
   addQuads,
   renderQuads,
   init,

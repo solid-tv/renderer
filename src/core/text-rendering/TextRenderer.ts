@@ -436,6 +436,14 @@ export interface TextRenderer {
   type: 'canvas' | 'sdf';
   font: FontHandler;
   renderText: (props: CoreTextNodeProps) => TextRenderInfo;
+  /**
+   * Compute only the laid-out dimensions of the text, without rasterizing
+   * (Canvas) or building glyph vertex data (SDF). Used to populate a text
+   * node's `w`/`h` eagerly at construction so layout consumers can react to
+   * the real size before the node is actually rendered. The returned width
+   * and height must match what {@link renderText} produces for the same props.
+   */
+  measureText: (props: CoreTextNodeProps) => TextRenderInfo;
   // Updated to accept layout data and return vertex buffer for performance
   addQuads: (layout?: TextLayout) => Float32Array | null;
   renderQuads: (

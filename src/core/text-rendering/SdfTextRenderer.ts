@@ -256,6 +256,59 @@ const renderQuads = (
 };
 
 /**
+ * Measure-only path: lay out the text via the layout engine and return its
+ * dimensions, without building the per-glyph vertex buffer. Used to populate a
+ * text node's w/h eagerly at construction.
+ *
+ * Kept as a standalone function (rather than a helper shared with
+ * {@link generateTextLayout}) so generateTextLayout stays byte-identical to
+ * upstream — the mapTextLayout invocation and the design-unit -> pixel scaling
+ * below mirror generateTextLayout and must be kept in sync with it. See
+ * {@link TextRenderer.measureText}.
+ */
+const measureText = (props: CoreTextNodeProps): TextRenderInfo => {
+  if (props.text.length === 0) {
+    return { width: 0, height: 0 };
+  }
+
+  const fontCache = SdfFontHandler.getFontData(props.fontFamily);
+  if (fontCache === undefined) {
+    return { width: 0, height: 0 };
+  }
+
+  const fontSize = props.fontSize;
+  const fontFamily = props.fontFamily;
+  const metrics = SdfFontHandler.getFontMetrics(fontFamily, fontSize);
+
+  // Pixel scale from atlas design units to pixels.
+  const fontScale = fontSize / fontCache.data.info.size;
+  const letterSpacing = props.letterSpacing / fontScale;
+  const maxWidth = props.maxWidth / fontScale;
+
+  const [, , , , , effectiveWidth, effectiveHeight] = mapTextLayout(
+    SdfFontHandler.measureText,
+    metrics,
+    props.text,
+    props.textAlign,
+    fontFamily,
+    props.lineHeight,
+    props.overflowSuffix,
+    props.wordBreak,
+    letterSpacing,
+    props.maxLines,
+    maxWidth,
+    props.maxHeight,
+  );
+
+  // generateTextLayout returns width in pixel space (effectiveWidth * fontScale)
+  // and height already in pixels — mirror that here.
+  return {
+    width: effectiveWidth * fontScale,
+    height: effectiveHeight,
+  };
+};
+
+/**
  * Generate complete text layout with glyph positioning for caching
  */
 const generateTextLayout = (
@@ -439,6 +492,7 @@ const SdfTextRenderer = {
   type,
   font,
   renderText,
+  measureText,
   addQuads,
   renderQuads,
   init,

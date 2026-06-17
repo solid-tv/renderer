@@ -147,6 +147,75 @@ describe('CoreTextNode (canvas) clearing text', () => {
   });
 });
 
+describe('CoreTextNode eager dimensions', () => {
+  const makeCanvasRendererWithFont = (
+    isFontLoaded: boolean,
+    measured: TextRenderInfo,
+  ): TextRenderer => {
+    const font = mock<FontHandler>({
+      type: 'canvas',
+      isFontLoaded: vi.fn(() => isFontLoaded),
+      waitingForFont: vi.fn(),
+    });
+    return {
+      type: 'canvas',
+      font,
+      renderText: vi.fn(),
+      measureText: vi.fn(() => measured),
+      addQuads: vi.fn(),
+      renderQuads: vi.fn(),
+      init: vi.fn(),
+    } as unknown as TextRenderer;
+  };
+
+  it('measures dimensions synchronously at construction when the font is loaded, without rendering', () => {
+    const renderer = makeCanvasRendererWithFont(true, {
+      width: 120,
+      height: 40,
+    });
+    const stage = makeStage(makeLoadedTexture());
+
+    const onLoaded = vi.fn();
+    // Spy must be wired through the renderer-agnostic path; emit happens only
+    // on render, not on measure.
+    const node = new CoreTextNode(
+      stage,
+      defaultProps({ text: 'Hello' }),
+      renderer,
+    );
+    node.on('loaded', onLoaded);
+
+    // Dimensions are available immediately — no frame, no microtask.
+    expect(renderer.measureText).toHaveBeenCalledTimes(1);
+    expect(node.props.w).toBe(120);
+    expect(node.props.h).toBe(40);
+
+    // Measuring must NOT render: no rasterization, no texture, no loaded event.
+    expect(renderer.renderText).not.toHaveBeenCalled();
+    expect(node.texture).toBe(null);
+    expect(onLoaded).not.toHaveBeenCalled();
+  });
+
+  it('does not measure or render when the font is not yet loaded', () => {
+    const renderer = makeCanvasRendererWithFont(false, {
+      width: 120,
+      height: 40,
+    });
+    const stage = makeStage(makeLoadedTexture());
+
+    const node = new CoreTextNode(
+      stage,
+      defaultProps({ text: 'Hello' }),
+      renderer,
+    );
+
+    expect(renderer.measureText).not.toHaveBeenCalled();
+    expect(renderer.renderText).not.toHaveBeenCalled();
+    expect(node.props.w).toBe(0);
+    expect(node.props.h).toBe(0);
+  });
+});
+
 describe('CoreTextNode (sdf) renderOnlyInViewport', () => {
   const makeSdfRenderer = (): TextRenderer => {
     const font = mock<FontHandler>({ type: 'sdf' });

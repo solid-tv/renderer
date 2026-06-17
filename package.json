@@ -71,6 +71,9 @@
     "vitest": "^2.1.9",
     "vitest-mock-extended": "^2.0.2"
   },
+  "peerDependencies": {
+    "@vitejs/plugin-legacy": "^7.0.0 || ^8.0.0"
+  },
   "lint-staged": {
     "*.ts": [
       "prettier --write",
