@@ -15,7 +15,6 @@ import {
 } from './CoreNode.js';
 import type { Stage } from './Stage.js';
 import type {
-  NodeTextFailedPayload,
   NodeTextLoadedPayload,
   NodeTextureLoadedPayload,
 } from '../common/CommonTypes.js';
@@ -85,6 +84,10 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
     this._containType = TextConstraint[props.contain];
 
     this.setUpdateType(UpdateType.All);
+
+    if (this.fontHandler.isFontLoaded(props.fontFamily)) {
+      this.generateLayout();
+    }
   }
 
   protected override onTextureLoaded: TextureLoadedEventHandler = (
@@ -195,22 +198,22 @@ export class CoreTextNode extends CoreNode implements CoreTextNodeProps {
   /**
    * Override CoreNode's update method to handle text-specific updates
    */
+  private generateLayout(): void {
+    if (this.fontHandler.isFontLoaded(this.textProps.fontFamily)) {
+      this._waitingForFont = false;
+      this._cachedLayout = null; // Invalidate cached layout
+      const resp = this.textRenderer.renderText(this.textProps);
+      this.handleRenderResult(resp);
+      this._layoutGenerated = true;
+    } else if (!this._waitingForFont) {
+      this.fontHandler.waitingForFont(this.textProps.fontFamily, this);
+      this._waitingForFont = true;
+    }
+  }
+
   override update(delta: number, parentClippingRect: RectWithValid): void {
-    if (
-      (this.textProps.forceLoad === true ||
-        this.allowTextGeneration() === true) &&
-      this._layoutGenerated === false
-    ) {
-      if (this.fontHandler.isFontLoaded(this.textProps.fontFamily) === true) {
-        this._waitingForFont = false;
-        this._cachedLayout = null; // Invalidate cached layout
-        const resp = this.textRenderer.renderText(this.textProps);
-        this.handleRenderResult(resp);
-        this._layoutGenerated = true;
-      } else if (this._waitingForFont === false) {
-        this.fontHandler.waitingForFont(this.textProps.fontFamily, this);
-        this._waitingForFont = true;
-      }
+    if ((this.textProps.forceLoad || this.allowTextGeneration()) && !this._layoutGenerated) {
+      this.generateLayout();
     }
 
     // First run the standard CoreNode update
