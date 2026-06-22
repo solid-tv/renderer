@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadFont } from '../SdfFontHandler.js';
+import { loadFont, waitingForFont, isFontLoaded } from '../SdfFontHandler.js';
 import { EventEmitter } from '../../../common/EventEmitter.js';
 import { TextureError, TextureErrorCode } from '../../TextureError.js';
 import type { Stage } from '../../Stage.js';
@@ -14,7 +14,19 @@ class FakeXHR {
   onerror: (() => void) | null = null;
   open(): void {}
   send(): void {
-    this.response = { chars: [{}] };
+    // Enough shape for processFontData to run on the success path without
+    // throwing: a chars array, an (empty) kernings array, and metrics so it
+    // skips the atlas-derived cap/x-height branches.
+    this.response = {
+      chars: [{}],
+      kernings: [],
+      lightningMetrics: {
+        ascender: 800,
+        descender: -200,
+        lineGap: 200,
+        unitsPerEm: 1000,
+      },
+    };
     if (this.onload !== null) {
       this.onload();
     }
@@ -108,5 +120,77 @@ describe('SdfFontHandler loadFont — failed event argument', () => {
     const lastCall = errSpy.mock.calls[errSpy.mock.calls.length - 1]!;
     expect(lastCall[1]).toBe(error);
     expect(lastCall[1]).not.toBe(tex);
+  });
+});
+
+describe('SdfFontHandler loadFont — retry after a failed load', () => {
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let originalXHR: unknown;
+
+  beforeEach(() => {
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    originalXHR = (globalThis as unknown as { XMLHttpRequest: unknown })
+      .XMLHttpRequest;
+    (globalThis as unknown as { XMLHttpRequest: unknown }).XMLHttpRequest =
+      FakeXHR;
+  });
+
+  afterEach(() => {
+    errSpy.mockRestore();
+    (globalThis as unknown as { XMLHttpRequest: unknown }).XMLHttpRequest =
+      originalXHR;
+  });
+
+  it('preserves nodes parked before the failure so a successful retry wakes them', async () => {
+    // Hand out a fresh texture per loadFont call so the first can fail and the
+    // second can succeed independently.
+    const textures: ReturnType<typeof makeFakeTexture>[] = [];
+    const stage = {
+      txManager: {
+        createTexture: () => {
+          const t = makeFakeTexture();
+          textures.push(t);
+          return t;
+        },
+      },
+    } as unknown as Stage;
+
+    const fontFamily = 'RetrySdfFont';
+    const opts = {
+      fontFamily,
+      atlasUrl: 'atlas.png',
+      atlasDataUrl: 'atlas.json',
+    } as Parameters<typeof loadFont>[1];
+
+    // First attempt: park a node waiting on the font, then fail the atlas.
+    const first = loadFont(stage, opts);
+    await flush();
+
+    const node = { id: 1, setUpdateType: vi.fn() };
+    waitingForFont(
+      fontFamily,
+      node as unknown as Parameters<typeof waitingForFont>[1],
+    );
+
+    const firstRejected = first.catch(() => {});
+    textures[0]!.emit(
+      'failed',
+      new TextureError(TextureErrorCode.TEXTURE_UPLOAD_FAILED, 'boom'),
+    );
+    await firstRejected;
+
+    expect(isFontLoaded(fontFamily)).toBe(false);
+    expect(node.setUpdateType).not.toHaveBeenCalled();
+
+    // Retry: reuses the existing waiter list, then succeeds.
+    const second = loadFont(stage, opts);
+    await flush();
+
+    textures[1]!.emit('loaded');
+    await second;
+
+    expect(isFontLoaded(fontFamily)).toBe(true);
+    // The node parked before the failed attempt was not stranded.
+    expect(node.setUpdateType).toHaveBeenCalledTimes(1);
   });
 });

@@ -320,7 +320,14 @@ export const loadFont = (
     );
   }
 
-  const nwff: CoreTextNode[] = (nodesWaitingForFont[fontFamily] = []);
+  // Reuse an existing waiter list. A previous load attempt for this font may
+  // have failed and left nodes parked here; overwriting the list would strand
+  // them, so a successful retry could never wake them. The list is consumed
+  // (and deleted) on the next successful load.
+  let nwff = nodesWaitingForFont[fontFamily];
+  if (nwff === undefined) {
+    nwff = nodesWaitingForFont[fontFamily] = [];
+  }
   // Create loading promise
   const loadPromise = (async (): Promise<void> => {
     const fontData = await new Promise<SdfFontData>((resolve, reject) => {
@@ -405,9 +412,15 @@ export const loadFont = (
       atlasTexture.on('failed', (_target, error: TextureError) => {
         // Cleanup on error
         fontLoadPromises.delete(fontFamily);
-        if (fontCache[fontFamily]) {
-          delete fontCache[fontFamily];
-        }
+        // fontCache is a Map: the old `delete fontCache[fontFamily]` deleted a
+        // plain property that never existed and left any real entry intact.
+        // Use the Map API.
+        fontCache.delete(fontFamily);
+        // Deliberately keep nodesWaitingForFont[fontFamily]: nodes parked here
+        // must survive a failed attempt so a later loadFont retry (which now
+        // reuses the list) can still wake them. The list is consumed on the
+        // next successful load and shrinks as nodes self-remove via
+        // stopWaitingForFont on destroy.
         console.error(`Failed to load SDF font: ${fontFamily}`, error);
         reject(error);
       });
