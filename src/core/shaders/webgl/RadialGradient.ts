@@ -83,8 +83,8 @@ export const RadialGradient: WebGlShaderType<RadialGradientProps> = {
         float dist = length((point - u_projection) / u_size);
 
         vec4 colorOut = getGradientColor(dist);
-        vec3 blendedRGB = mix(color.rgb, colorOut.rgb, clamp(colorOut.a, 0.0, 1.0));
-        gl_FragColor = vec4(blendedRGB, color.a);
+        color = mix(color, colorOut, clamp(colorOut.a, 0.0, 1.0));
+        gl_FragColor = color * u_alpha;
       }
     `;
   },
