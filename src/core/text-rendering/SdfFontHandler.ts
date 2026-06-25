@@ -109,6 +109,12 @@ export interface SdfFont {
   maxCharHeight: number;
 }
 
+// Number of times a failed font load is automatically retried before
+// loadFont() finally rejects. Counts reloads *after* the initial attempt
+// (matching the `maxRetryCount` = retries convention used for textures), so
+// the load is attempted up to MAX_FONT_LOAD_RETRIES + 1 times in total.
+export const MAX_FONT_LOAD_RETRIES = 3;
+
 //global state variables for SdfFontHandler
 const fontCache = new Map<string, SdfFont>();
 const fontLoadPromises = new Map<string, Promise<void>>();
@@ -320,10 +326,18 @@ export const loadFont = (
     );
   }
 
-  const nwff: CoreTextNode[] = (nodesWaitingForFont[fontFamily] = []);
-  // Create loading promise
-  const loadPromise = (async (): Promise<void> => {
-    const fontData = await new Promise<SdfFontData>((resolve, reject) => {
+  // Reuse an existing waiter list. A previous load attempt for this font may
+  // have failed and left nodes parked here; overwriting the list would strand
+  // them, so a successful retry could never wake them. The list is consumed
+  // (and deleted) on the next successful load.
+  let nwff = nodesWaitingForFont[fontFamily];
+  if (nwff === undefined) {
+    nwff = nodesWaitingForFont[fontFamily] = [];
+  }
+  // One attempt at fetching + decoding the JSON atlas description. A fresh
+  // XHR runs per attempt so a transient network/parse failure can recover.
+  const fetchFontData = (): Promise<SdfFontData> =>
+    new Promise<SdfFontData>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('GET', atlasDataUrl, true);
       xhr.responseType = 'json';
@@ -352,16 +366,23 @@ export const loadFont = (
       };
       xhr.send(null);
     });
+
+  // One attempt at loading the atlas texture for the given font data. On
+  // success it processes + caches the font and wakes parked nodes. On failure
+  // it drops the dead atlas texture (createTexture caches by `src`, so the
+  // next attempt must evict it to build a fresh one) and rejects.
+  const loadAtlas = (fontData: SdfFontData): Promise<void> => {
     if (!fontData || !fontData.chars) {
-      throw new Error('Invalid SDF font data format');
+      return Promise.reject(new Error('Invalid SDF font data format'));
     }
 
     // Atlas texture should be provided externally
     if (!atlasUrl) {
-      throw new Error('Atlas texture must be provided for SDF fonts');
+      return Promise.reject(
+        new Error('Atlas texture must be provided for SDF fonts'),
+      );
     }
 
-    // Wait for atlas texture to load
     return new Promise<void>((resolve, reject) => {
       // create new atlas texture using ImageTexture
       const atlasTexture = stage.txManager.createTexture('ImageTexture', {
@@ -372,46 +393,72 @@ export const loadFont = (
       atlasTexture.setRenderableOwner(fontFamily, true);
       atlasTexture.preventCleanup = true; // Prevent automatic cleanup
 
-      if (atlasTexture.state === 'loaded') {
-        // If already loaded, process immediately
-        processFontData(fontFamily, fontData, atlasTexture, metrics);
-        fontLoadPromises.delete(fontFamily);
-
-        for (let key in nwff) {
-          nwff[key]!.setUpdateType(UpdateType.Local);
-        }
-        delete nodesWaitingForFont[fontFamily];
-        return resolve();
-      }
-
-      atlasTexture.on('loaded', () => {
+      const onLoaded = () => {
         // Process and cache font data
         processFontData(fontFamily, fontData, atlasTexture, metrics);
-
-        // remove from promises
-        fontLoadPromises.delete(fontFamily);
 
         for (let key in nwff) {
           nwff[key]!.setUpdateType(UpdateType.Local);
         }
         delete nodesWaitingForFont[fontFamily];
         resolve();
-      });
+      };
+
+      if (atlasTexture.state === 'loaded') {
+        // If already loaded, process immediately
+        onLoaded();
+        return;
+      }
+
+      atlasTexture.on('loaded', onLoaded);
 
       // EventEmitter invokes listeners as (target, data), so the error payload
       // is the SECOND argument. The first arg is the Texture that emitted the
       // event. Reading it as the only param (the previous behavior) rejected
       // and logged the Texture instead of the actual TextureError.
       atlasTexture.on('failed', (_target, error: TextureError) => {
-        // Cleanup on error
-        fontLoadPromises.delete(fontFamily);
-        if (fontCache[fontFamily]) {
-          delete fontCache[fontFamily];
-        }
-        console.error(`Failed to load SDF font: ${fontFamily}`, error);
+        // Drop the failed atlas so a retry builds a fresh texture rather than
+        // getting this dead instance back from the createTexture key-cache.
+        atlasTexture.setRenderableOwner(fontFamily, false);
+        stage.txManager.removeTextureFromCache(atlasTexture);
         reject(error);
       });
     });
+  };
+
+  // Initial attempt plus up to MAX_FONT_LOAD_RETRIES automatic reloads.
+  const loadPromise = (async (): Promise<void> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_FONT_LOAD_RETRIES; attempt++) {
+      try {
+        await loadAtlas(await fetchFontData());
+        // Success: clear the in-flight marker (the font now lives in fontCache)
+        // — parked nodes were already woken inside loadAtlas.
+        fontLoadPromises.delete(fontFamily);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < MAX_FONT_LOAD_RETRIES) {
+          console.warn(
+            `SDF font "${fontFamily}" failed to load (attempt ${
+              attempt + 1
+            } of ${MAX_FONT_LOAD_RETRIES + 1}), retrying.`,
+            error,
+          );
+        }
+      }
+    }
+
+    // Every attempt failed. Clear the in-flight marker so the font can be
+    // requested again and drop any partial cache entry. nodesWaitingForFont
+    // is deliberately kept: nodes parked here must survive so a later
+    // loadFont() (which reuses the list) can still wake them if the font
+    // eventually loads. The list shrinks as nodes self-remove via
+    // stopWaitingForFont on destroy.
+    fontLoadPromises.delete(fontFamily);
+    fontCache.delete(fontFamily);
+    console.error(`Failed to load SDF font: ${fontFamily}`, lastError);
+    throw lastError;
   })();
 
   fontLoadPromises.set(fontFamily, loadPromise);
