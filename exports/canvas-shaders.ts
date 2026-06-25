@@ -8,6 +8,7 @@ export { Border } from '../src/core/shaders/canvas/Border.js';
 export { Shadow } from '../src/core/shaders/canvas/Shadow.js';
 export { HolePunch } from '../src/core/shaders/canvas/HolePunch.js';
 export { LinearGradient } from '../src/core/shaders/canvas/LinearGradient.js';
+export { EdgeFade } from '../src/core/shaders/canvas/EdgeFade.js';
 export { RadialGradient } from '../src/core/shaders/canvas/RadialGradient.js';
 export { RadialProgress } from '../src/core/shaders/canvas/RadialProgress.js';
 export { Blur } from '../src/core/shaders/canvas/Blur.js';
