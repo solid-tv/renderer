@@ -219,7 +219,10 @@ export class ImageTexture extends Texture {
         },
       );
       return { data: bitmap, premultiplyAlpha: useGlPremultiply };
-    } else if (imageBitmapSupported.basic === true) {
+    } else if (
+      imageBitmapSupported.options === false &&
+      imageBitmapSupported.full === false
+    ) {
       // basic createImageBitmap without options or crop
       // this is supported for Chrome v50 to v52/54 that doesn't support options.
       // The browser default premultiplies, so WebGL must not premultiply again.
