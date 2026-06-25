@@ -171,6 +171,13 @@ export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
           layer = fillPM * fillCoverage;
         #endif
 
+        // Apply node opacity to the introduced ring/track colors. They come
+        // from u_colors / u_trackColor and do not carry worldAlpha, so without
+        // this a fading RadialProgress node would keep its ring fully opaque.
+        // \`base\` already includes worldAlpha (via v_color), so it is left as-is
+        // to avoid double-applying. Scaling a premultiplied layer is valid.
+        layer *= u_alpha;
+
         // Premultiplied "over": out = src + dst*(1 - src.a). The output stays
         // visible on a fully-transparent \`base\` because layer brings its own alpha.
         float la = clamp(layer.a, 0.0, 1.0);
