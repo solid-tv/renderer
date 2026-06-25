@@ -23,6 +23,9 @@ import type {
 import { WebPlatform } from '../core/platforms/web/WebPlatform.js';
 import { Platform } from '../core/platforms/Platform.js';
 
+/** Shared default `handleLoopError` — swallows the error, keeping the loop alive. */
+const noop = (): void => {};
+
 /**
  * FPS Update Event Data
  *
@@ -661,6 +664,27 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    *
    */
   maxRetryCount?: number;
+
+  /**
+   * Render loop error handler — an escape hatch for `requestAnimationFrame` crashes
+   *
+   * @remarks
+   * The render loop runs client-supplied code every frame: synchronous event
+   * subscribers (`frameTick`, `idle`, `fpsUpdate`, etc.) and animation steps. If
+   * any of these throw, the exception would otherwise propagate out of the
+   * `requestAnimationFrame` callback and permanently stop the loop — freezing
+   * the entire app until reload.
+   *
+   * The loop catches such errors and never lets them stop it. By default the
+   * error is swallowed (the default handler is a no-op), so a single bad frame
+   * can't freeze the app. Provide your own handler to log/report the crash (and
+   * optionally recover); the loop still keeps running after it returns.
+   *
+   * @param error The error thrown during the frame
+   *
+   * @defaultValue a no-op (errors are swallowed; the loop keeps running)
+   */
+  handleLoopError?: (error: unknown) => void;
 };
 
 /**
@@ -777,6 +801,9 @@ export class RendererMain extends EventEmitter {
           : settings.premultiplyAlphaHonored,
       platform: settings.platform || null,
       maxRetryCount: settings.maxRetryCount ?? 5,
+      // Default to a no-op so a thrown frame is swallowed and the render loop
+      // never crashes; apps can override to log/report.
+      handleLoopError: settings.handleLoopError ?? noop,
     };
 
     const {
@@ -841,6 +868,7 @@ export class RendererMain extends EventEmitter {
       premultiplyAlphaHonored: settings.premultiplyAlphaHonored,
       platform,
       maxRetryCount: settings.maxRetryCount ?? 5,
+      handleLoopError: settings.handleLoopError,
     });
 
     // Extract the root node
