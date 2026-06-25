@@ -268,7 +268,7 @@ export class ImageWorkerManager {
       );
     }
 
-    if (createImageBitmapSupport.premultiplyHonored === false) {
+    if (createImageBitmapSupport.premultiplyHonored !== true) {
       workerCode = workerCode.replace(
         'var premultiplyAlphaHonored = true;',
         'var premultiplyAlphaHonored = false;',
