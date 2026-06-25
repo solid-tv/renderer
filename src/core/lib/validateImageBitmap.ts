@@ -172,5 +172,13 @@ export async function detectPremultiplyAlphaHonored(
   gl.deleteTexture(tex);
   bitmap.close?.();
 
+  // Release this throwaway context immediately. Embedded TV browsers cap the
+  // number of live WebGL contexts very low; since this probe runs AFTER the
+  // main render context is created, a leaked context here is the newest one
+  // and its lingering presence can push the page over the limit, evicting the
+  // OLDEST context (the live render context) — which then fails every
+  // createTexture. Don't wait for GC to reclaim the canvas; drop it now.
+  gl.getExtension('WEBGL_lose_context')?.loseContext();
+
   return result;
 }
