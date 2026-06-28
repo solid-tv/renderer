@@ -29,9 +29,24 @@ export class WebPlatform extends Platform {
   override startLoop(stage: Stage): void {
     let isIdle = false;
     let lastFrameTime = 0;
+    // Set by `tick` once it has queued the next frame; read by `runLoop`'s catch
+    // so a throw after scheduling never double-schedules (which would compound
+    // into runaway frames if it threw every frame). Reset at the top of each frame.
+    let scheduled = false;
     const buffer = 4;
 
-    const runLoop = (currentTime: number = 0) => {
+    const requestLoop = () => requestAnimationFrame(runLoop);
+
+    // All per-frame work lives in `tick`, deliberately split out of `runLoop`.
+    // `runLoop` carries the try/catch that keeps the loop alive, and some
+    // optimizing compilers — notably Chrome 38's Crankshaft, our language floor —
+    // refuse to optimize any function that contains a try/catch. Keeping that
+    // guard in a near-empty shell confines the de-opt to the shell: every hot
+    // operation (the `stage.*` calls below, run every frame) stays in fully
+    // optimizable functions. `tick` is also where all client-supplied code runs
+    // (synchronous event subscribers, the events drained by `flushFrameEvents`,
+    // and animation steps) — i.e. everything that can actually throw.
+    const tick = (currentTime: number) => {
       // The GL context is lost and the engine does not rebuild it in place.
       // Stop the loop entirely (no reschedule) so we issue no GL calls against
       // a dead context. Recovery is via app reload (see the `contextLost` event).
@@ -55,6 +70,7 @@ export class WebPlatform extends Platform {
           } else {
             requestAnimationFrame(runLoop);
           }
+          scheduled = true;
           return;
         }
 
@@ -64,65 +80,62 @@ export class WebPlatform extends Platform {
         lastFrameTime = currentTime;
       }
 
-      // From here on the frame runs client-supplied code: synchronous event
-      // subscribers (`frameTick`, `idle`, and the queued events drained by
-      // `flushFrameEvents`) and animation steps. A throw in any of these would
-      // otherwise propagate out of the rAF callback and permanently stop the
-      // render loop — the whole app freezes until reload. Guard the body and
-      // always keep the loop alive: hand the error to `handleLoopError` (a
-      // no-op by default; the app can override it to log/report) and reschedule.
-      // `scheduled` tracks whether the next tick was already queued before the
-      // throw so we never double-schedule (which would compound into runaway
-      // frames if it threw every frame).
-      let scheduled = false;
-      try {
-        stage.updateFrameTime();
-        const hasActiveAnimations = stage.updateAnimations();
+      stage.updateFrameTime();
+      const hasActiveAnimations = stage.updateAnimations();
 
-        if (!stage.hasSceneUpdates()) {
-          // We still need to calculate the fps else it looks like the app is frozen
-          stage.calculateFps();
+      if (!stage.hasSceneUpdates()) {
+        // We still need to calculate the fps else it looks like the app is frozen
+        stage.calculateFps();
 
-          // We use 15ms instead of 16.6ms to provide a safety buffer.
-          // This ensures we wake up slightly before the next frame to check for updates,
-          // preventing us from missing a frame due to timer variances.
-          setTimeout(requestLoop, Math.max(targetFrameTime, 15));
-          scheduled = true;
+        // We use 15ms instead of 16.6ms to provide a safety buffer.
+        // This ensures we wake up slightly before the next frame to check for updates,
+        // preventing us from missing a frame due to timer variances.
+        setTimeout(requestLoop, Math.max(targetFrameTime, 15));
+        scheduled = true;
 
-          if (isIdle === false) {
-            // The render burst has settled. Probe for a GPU out-of-memory now
-            // rather than every frame: GL errors accumulate and persist until
-            // drained, so a single check here still catches any OOM raised during
-            // the active frames, without paying the getError() CPU/GPU sync on
-            // every frame. Queues the `outOfMemory` event, flushed below.
-            if (stage.renderer.checkForOutOfMemory() === true) {
-              stage.txMemManager.handleOutOfMemory();
-            }
-            stage.shManager.cleanup();
-            stage.cleanupTextRenderers();
-            stage.eventBus.emit('idle');
-            isIdle = true;
+        if (isIdle === false) {
+          // The render burst has settled. Probe for a GPU out-of-memory now
+          // rather than every frame: GL errors accumulate and persist until
+          // drained, so a single check here still catches any OOM raised during
+          // the active frames, without paying the getError() CPU/GPU sync on
+          // every frame. Queues the `outOfMemory` event, flushed below.
+          if (stage.renderer.checkForOutOfMemory() === true) {
+            stage.txMemManager.handleOutOfMemory();
           }
-
-          if (stage.txMemManager.checkCleanup() === true) {
-            stage.txMemManager.cleanup();
-          }
-
-          stage.flushFrameEvents();
-          return;
+          stage.shManager.cleanup();
+          stage.cleanupTextRenderers();
+          stage.eventBus.emit('idle');
+          isIdle = true;
         }
 
-        isIdle = false;
-        stage.drawFrame(hasActiveAnimations);
-        stage.flushFrameEvents();
+        if (stage.txMemManager.checkCleanup() === true) {
+          stage.txMemManager.cleanup();
+        }
 
-        // Schedule next frame
-        requestAnimationFrame(runLoop);
-        scheduled = true;
+        stage.flushFrameEvents();
+        return;
+      }
+
+      isIdle = false;
+      stage.drawFrame(hasActiveAnimations);
+      stage.flushFrameEvents();
+
+      // Schedule next frame
+      requestAnimationFrame(runLoop);
+      scheduled = true;
+    };
+
+    const runLoop = (currentTime: number = 0) => {
+      // `tick` runs client-supplied code every frame; a throw there would
+      // otherwise propagate out of the rAF callback and permanently stop the
+      // render loop — the whole app freezes until reload. Guard it and always
+      // keep the loop alive: hand the error to `handleLoopError` (a no-op by
+      // default; the app can override it to log/report) and reschedule unless
+      // `tick` already queued the next frame before throwing.
+      scheduled = false;
+      try {
+        tick(currentTime);
       } catch (error: unknown) {
-        // Report the error (default handler is a no-op), then keep the loop
-        // alive — a single bad frame must never freeze the app. Skip the
-        // reschedule if this frame already queued the next tick before throwing.
         const handleLoopError = stage.options.handleLoopError;
         if (handleLoopError !== undefined) {
           handleLoopError(error);
@@ -132,8 +145,6 @@ export class WebPlatform extends Platform {
         }
       }
     };
-
-    const requestLoop = () => requestAnimationFrame(runLoop);
 
     requestAnimationFrame(runLoop);
   }
