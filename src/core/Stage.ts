@@ -737,6 +737,17 @@ export class Stage {
   }
 
   requestRenderListUpdate() {
+    this.requestRender();
+
+    // A rebuild is already pending: the invalidation below ran when the flag
+    // was first raised, and the render list doesn't change until drawFrame
+    // rebuilds it. Skipping the repeat matters when many nodes flip renderable
+    // state in one frame (e.g. a whole row scrolling out of the viewport) —
+    // invalidateQuadBuffer walks the entire render list on every call.
+    if (this.renderListDirty === true) {
+      return;
+    }
+
     // Notify the renderer that the render list is structurally changing.
     // For the WebGL renderer this resets per-node buffer slot assignments
     // and schedules a full GPU buffer re-upload on the next frame.
@@ -744,7 +755,6 @@ export class Stage {
       this.renderer.invalidateQuadBuffer();
     }
     this.renderListDirty = true;
-    this.requestRender();
   }
 
   buildRenderList(node: CoreNode) {

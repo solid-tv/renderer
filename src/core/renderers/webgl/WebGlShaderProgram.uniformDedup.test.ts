@@ -13,7 +13,8 @@ type FakeGlw = {
   uniform1f: ReturnType<typeof vi.fn>;
   uniform2f: ReturnType<typeof vi.fn>;
   uniform4f: ReturnType<typeof vi.fn>;
-  canvas: { width: number; height: number };
+  canvasW: number;
+  canvasH: number;
 };
 
 const makeProgram = (): { program: WebGlShaderProgram; glw: FakeGlw } => {
@@ -21,7 +22,8 @@ const makeProgram = (): { program: WebGlShaderProgram; glw: FakeGlw } => {
     uniform1f: vi.fn(),
     uniform2f: vi.fn(),
     uniform4f: vi.fn(),
-    canvas: { width: 1920, height: 1080 },
+    canvasW: 1920,
+    canvasH: 1080,
   };
 
   const program = Object.create(

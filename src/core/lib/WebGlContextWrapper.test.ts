@@ -19,7 +19,7 @@ function mockWebGl1(hasVaoExtension: boolean): WebGLRenderingContext {
     deleteVertexArrayOES: (_vao: unknown) => undefined,
   };
   const target: Record<string, unknown> = {
-    canvas: {},
+    canvas: { width: 1920, height: 1080 },
     drawingBufferWidth: 100,
     drawingBufferHeight: 100,
     getParameter: () => 8,
@@ -54,5 +54,27 @@ describe('WebGlContextWrapper VAO support', () => {
     expect(glw.canUseVertexArrayObject).toBe(false);
     // The flag gates VAO usage only; it does not change the detected context.
     expect(glw.isWebGl2).toBe(false);
+  });
+});
+
+describe('WebGlContextWrapper canvas dimension cache', () => {
+  it('seeds canvasW/canvasH from the canvas at construction', () => {
+    const glw = new WebGlContextWrapper(mockWebGl1(true));
+    expect(glw.canvasW).toBe(1920);
+    expect(glw.canvasH).toBe(1080);
+  });
+
+  it('does not track canvas resizes until updateCanvasDimensions is called', () => {
+    const glw = new WebGlContextWrapper(mockWebGl1(true));
+    const canvas = glw.canvas as { width: number; height: number };
+
+    canvas.width = 1280;
+    canvas.height = 720;
+    expect(glw.canvasW).toBe(1920);
+    expect(glw.canvasH).toBe(1080);
+
+    glw.updateCanvasDimensions();
+    expect(glw.canvasW).toBe(1280);
+    expect(glw.canvasH).toBe(720);
   });
 });

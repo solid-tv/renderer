@@ -60,7 +60,7 @@ export class SdfRenderOp extends CoreRenderOp {
   }
 
   draw() {
-    const { glw, options, stage } = this.renderer;
+    const { glw, stage } = this.renderer;
 
     stage.shManager.useShader(this.shader.program);
     this.shader.program.bindRenderOp(this);
@@ -73,7 +73,7 @@ export class SdfRenderOp extends CoreRenderOp {
       const clipWidth = Math.round(this.clippingRect.w * pixelRatio);
       const clipHeight = Math.round(this.clippingRect.h * pixelRatio);
       let clipY = Math.round(
-        options.canvas.height - clipHeight - this.clippingRect.y * pixelRatio,
+        glw.canvasH - clipHeight - this.clippingRect.y * pixelRatio,
       );
       // if parent has render texture, we need to adjust the scissor rect
       // to be relative to the parent's framebuffer
