@@ -30,6 +30,10 @@ export interface ExampleSettings {
    */
   testName: string;
   /**
+   * Render mode the test is running under.
+   */
+  renderMode: 'webgl' | 'canvas';
+  /**
    * Renderer instance
    */
   renderer: RendererMain;

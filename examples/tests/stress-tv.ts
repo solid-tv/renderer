@@ -135,7 +135,11 @@ export default async function test({
   renderer,
   testRoot,
   perfMultiplier,
+  renderMode,
 }: ExampleSettings) {
+  // The SDF text renderer is not registered in canvas render mode — fall back
+  // to canvas text there so the HUD and card text still render.
+  const textRenderer = renderMode === 'canvas' ? 'canvas' : 'sdf';
   const params = new URLSearchParams(window.location.search);
   const autosweep = params.get('autosweep') === 'true';
   const loadBudgetMs = Number(params.get('loadbudget') ?? 1000);
@@ -171,7 +175,7 @@ export default async function test({
     x: 20,
     y: APP_H - 150,
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf', // never Canvas here — it re-rasterizes per edit and OOMs TVs
+    textRendererOverride: textRenderer, // sdf on webgl — Canvas text re-rasterizes per edit and OOMs TVs
     fontSize: 22,
     color: 0xffffffff,
     text: '',
@@ -253,7 +257,7 @@ export default async function test({
           x: gap,
           y: cardH * 0.62,
           fontFamily: 'Ubuntu',
-          textRendererOverride: 'sdf',
+          textRendererOverride: textRenderer,
           fontSize,
           color: 0xffffffff,
           text: randomTitle(8),
@@ -267,7 +271,7 @@ export default async function test({
           x: gap,
           y: cardH * 0.62 + fontSize * 1.3,
           fontFamily: 'Ubuntu',
-          textRendererOverride: 'sdf',
+          textRendererOverride: textRenderer,
           fontSize: fontSize * 0.8,
           color: 0x94a3b8ff, // slate-400 (0xRRGGBBAA)
           text: randomTitle(12),
@@ -413,7 +417,7 @@ export default async function test({
       x: 40,
       y: 60,
       fontFamily: 'Ubuntu',
-      textRendererOverride: 'sdf',
+      textRendererOverride: textRenderer,
       fontSize: 30,
       lineHeight: 42,
       color: 0xffffffff,

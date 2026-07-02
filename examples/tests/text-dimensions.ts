@@ -20,7 +20,8 @@ export async function automation(settings: ExampleSettings) {
  * @returns
  */
 export default async function test(settings: ExampleSettings) {
-  const { renderer, testRoot } = settings;
+  const { renderer, testRoot, renderMode } = settings;
+  const sdfEnabled = renderMode === 'webgl';
 
   // Set a smaller snapshot area
   testRoot.w = 200;
@@ -44,7 +45,7 @@ export default async function test(settings: ExampleSettings) {
     color: 0x000000ff,
     forceLoad: true,
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
+    textRendererOverride: sdfEnabled ? 'sdf' : 'canvas',
     fontSize: 50,
     text: '',
     parent: testRoot,
@@ -65,13 +66,17 @@ export default async function test(settings: ExampleSettings) {
 
   let i = 0;
   const mutations = [
-    () => {
-      text1.text = 'SDF';
-      text1.textRendererOverride = 'sdf';
-    },
-    () => {
-      text1.text = 'SDF\ngyqpj';
-    },
+    ...(sdfEnabled
+      ? [
+          () => {
+            text1.text = 'SDF';
+            text1.textRendererOverride = 'sdf';
+          },
+          () => {
+            text1.text = 'SDF\ngyqpj';
+          },
+        ]
+      : []),
     () => {
       text1.text = 'Canvas';
       text1.textRendererOverride = 'canvas';
@@ -79,21 +84,29 @@ export default async function test(settings: ExampleSettings) {
     () => {
       text1.text = 'Canvas\ngyqpj';
     },
-    () => {
-      // Test one more time with SDF to make sure Canvas
-      text1.text = 'SDF 2nd';
-      text1.textRendererOverride = 'sdf';
-    },
+    ...(sdfEnabled
+      ? [
+          () => {
+            // Test one more time with SDF to make sure Canvas
+            text1.text = 'SDF 2nd';
+            text1.textRendererOverride = 'sdf';
+          },
+        ]
+      : []),
     () => {
       // Test when text ends with space for correct width
       text1.text = 'Canvas ';
       text1.textRendererOverride = 'canvas';
     },
-    () => {
-      // Test when text ends with space for correct width
-      text1.text = 'SDF ';
-      text1.textRendererOverride = 'sdf';
-    },
+    ...(sdfEnabled
+      ? [
+          () => {
+            // Test when text ends with space for correct width
+            text1.text = 'SDF ';
+            text1.textRendererOverride = 'sdf';
+          },
+        ]
+      : []),
   ];
   /**
    * Run the next mutation in the list

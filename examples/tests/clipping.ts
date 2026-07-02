@@ -1,5 +1,5 @@
 import type { ExampleSettings } from '../common/ExampleSettings.js';
-import { paginateTestRows } from '../common/paginateTestRows.js';
+import { paginateTestRows, type TestRow } from '../common/paginateTestRows.js';
 import { PageContainer } from '../common/PageContainer.js';
 import { waitForLoadedDimensions } from '../common/utils.js';
 import { deg2Rad } from '@lightningjs/renderer/utils';
@@ -15,7 +15,7 @@ const SQUARE_SIZE = 200;
 const PADDING = 20;
 
 export default async function test(settings: ExampleSettings) {
-  const { renderer } = settings;
+  const { renderer, renderMode } = settings;
   const pageContainer = new PageContainer(settings, {
     w: renderer.settings.appWidth,
     h: renderer.settings.appHeight,
@@ -434,34 +434,39 @@ export default async function test(settings: ExampleSettings) {
         return SQUARE_SIZE;
       },
     },
-    {
-      title:
-        'SDF text clips ANCESTOR text node children that is outside of its bounds',
-      content: async (rowNode) => {
-        const curX = 0;
+    // The SDF text renderer is not registered in canvas render mode
+    ...((renderMode === 'webgl'
+      ? [
+          {
+            title:
+              'SDF text clips ANCESTOR text node children that is outside of its bounds',
+            content: async (rowNode) => {
+              const curX = 0;
 
-        const parent = renderer.createNode({
-          x: curX,
-          w: SQUARE_SIZE,
-          h: SQUARE_SIZE,
-          parent: rowNode,
-          clipping: true,
-        });
+              const parent = renderer.createNode({
+                x: curX,
+                w: SQUARE_SIZE,
+                h: SQUARE_SIZE,
+                parent: rowNode,
+                clipping: true,
+              });
 
-        renderer.createTextNode({
-          w: SQUARE_SIZE,
-          h: SQUARE_SIZE,
-          parent,
-          fontFamily: 'Ubuntu',
-          fontSize: 40,
-          color: 0x000000ff,
-          textRendererOverride: 'sdf',
-          text: 'SDF ancestor clipping',
-        });
+              renderer.createTextNode({
+                w: SQUARE_SIZE,
+                h: SQUARE_SIZE,
+                parent,
+                fontFamily: 'Ubuntu',
+                fontSize: 40,
+                color: 0x000000ff,
+                textRendererOverride: 'sdf',
+                text: 'SDF ancestor clipping',
+              });
 
-        return SQUARE_SIZE;
-      },
-    },
+              return SQUARE_SIZE;
+            },
+          },
+        ]
+      : []) satisfies TestRow[]),
     {
       title: 'Clipping bounds are scaled with the `scale` property',
       content: async (rowNode) => {

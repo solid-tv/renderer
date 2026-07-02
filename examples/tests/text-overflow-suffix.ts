@@ -11,7 +11,7 @@ export async function automation(settings: ExampleSettings) {
 }
 
 export default async function test(settings: ExampleSettings) {
-  const { renderer } = settings;
+  const { renderer, renderMode } = settings;
   const pageContainer = new PageContainer(settings, {
     w: renderer.settings.appWidth,
     h: renderer.settings.appHeight,
@@ -19,7 +19,9 @@ export default async function test(settings: ExampleSettings) {
   });
 
   await paginateTestRows(pageContainer, [
-    ...generateOverflowSuffixTest(renderer, 'sdf'),
+    ...(renderMode === 'webgl'
+      ? generateOverflowSuffixTest(renderer, 'sdf')
+      : []),
     ...generateOverflowSuffixTest(renderer, 'canvas'),
   ]);
 

@@ -20,7 +20,7 @@ export async function automation(settings: ExampleSettings) {
  * @returns
  */
 export default async function test(settings: ExampleSettings) {
-  const { renderer, testRoot } = settings;
+  const { renderer, testRoot, renderMode } = settings;
 
   // Set a smaller snapshot area
   testRoot.w = 400;
@@ -45,20 +45,24 @@ export default async function test(settings: ExampleSettings) {
     parent: testRoot,
   });
 
-  const text1 = renderer.createTextNode({
-    x: textSizeAfterLoadingBg.x,
-    y: textSizeAfterLoadingBg.y,
-    color: 0x000000ff,
-    forceLoad: true,
-    fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
-    fontSize: 20,
-    text: `Lorem ipsum dolor sit e
+  // The SDF text renderer is not registered in canvas render mode
+  const text1 =
+    renderMode === 'webgl'
+      ? renderer.createTextNode({
+          x: textSizeAfterLoadingBg.x,
+          y: textSizeAfterLoadingBg.y,
+          color: 0x000000ff,
+          forceLoad: true,
+          fontFamily: 'Ubuntu',
+          textRendererOverride: 'sdf',
+          fontSize: 20,
+          text: `Lorem ipsum dolor sit e
 Consectetur adipiscing elit. Vivamus id.
 Suspendisse sollicitudin posuere felis.
 Vivamus consectetur ex magna, non mollis.`,
-    parent: testRoot,
-  });
+          parent: testRoot,
+        })
+      : null;
 
   const text2 = renderer.createTextNode({
     x: textSizeAfterLoadingBg.x,
@@ -132,32 +136,40 @@ Vivamus consectetur ex magna, non mollis.`,
   });
 
   let i = 0;
+  const sdfMutations =
+    text1 === null
+      ? []
+      : [
+          () => {
+            text1.alpha = 1;
+            text2.alpha = 0;
+            text1.maxWidth = 0;
+            text1.maxHeight = 0;
+          },
+          () => {
+            // SDF, contain width
+            text1.maxWidth = 200;
+          },
+          () => {
+            // SDF, contain width (smaller)
+            text1.maxWidth = 195;
+          },
+          () => {
+            // SDF, contain both
+            text1.maxHeight = 203;
+          },
+          () => {
+            // SDF, contain both (1 pixel larger to show another line)
+            text1.maxHeight = 204;
+          },
+        ];
   const mutations = [
-    () => {
-      text1.alpha = 1;
-      text2.alpha = 0;
-      text1.maxWidth = 0;
-      text1.maxHeight = 0;
-    },
-    () => {
-      // SDF, contain width
-      text1.maxWidth = 200;
-    },
-    () => {
-      // SDF, contain width (smaller)
-      text1.maxWidth = 195;
-    },
-    () => {
-      // SDF, contain both
-      text1.maxHeight = 203;
-    },
-    () => {
-      // SDF, contain both (1 pixel larger to show another line)
-      text1.maxHeight = 204;
-    },
+    ...sdfMutations,
     () => {
       // Canvas, contain none
-      text1.alpha = 0;
+      if (text1 !== null) {
+        text1.alpha = 0;
+      }
       text2.alpha = 1;
       text2.maxWidth = 0;
     },
@@ -194,10 +206,11 @@ Vivamus consectetur ex magna, non mollis.`,
     }
     i = idx;
     mutations[i]?.();
-    const targetText = i > 4 ? text2 : text1;
+    const isCanvas = i >= sdfMutations.length || text1 === null;
+    const targetText = isCanvas ? text2 : text1;
 
     header.text = makeHeader(
-      i > 4 ? 'canvas' : 'sdf',
+      isCanvas ? 'canvas' : 'sdf',
       targetText.maxWidth,
       targetText.maxHeight,
     );

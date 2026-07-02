@@ -1,6 +1,9 @@
 import type { ExampleSettings } from '../common/ExampleSettings.js';
 import spritemap from '../assets/spritemap.png';
 
+// renderToTexture is a noop on the Canvas2D backend
+export const renderModes: ('webgl' | 'canvas')[] = ['webgl'];
+
 export async function automation(settings: ExampleSettings) {
   // Snapshot single page
   await test(settings);
