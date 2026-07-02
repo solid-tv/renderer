@@ -243,8 +243,8 @@ export class WebGlShaderProgram implements CoreShaderProgram {
       resolutionH = framebufferDimensions.h;
     } else {
       pixelRatio = renderOp.stage.pixelRatio;
-      resolutionW = this.glw.canvas.width;
-      resolutionH = this.glw.canvas.height;
+      resolutionW = this.glw.canvasW;
+      resolutionH = this.glw.canvasH;
     }
 
     if (pixelRatio !== this.lastPixelRatio) {

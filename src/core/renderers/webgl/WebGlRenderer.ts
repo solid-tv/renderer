@@ -212,7 +212,7 @@ export class WebGlRenderer extends CoreRenderer {
       gl,
       options.disableVertexArrayObject,
     ));
-    glw.viewport(0, 0, options.canvas.width, options.canvas.height);
+    glw.viewport(0, 0, glw.canvasW, glw.canvasH);
 
     this.attachContextLossListeners(options.canvas);
 
@@ -1264,7 +1264,7 @@ export class WebGlRenderer extends CoreRenderer {
     // Bind the default framebuffer
     glw.bindFramebuffer(null);
 
-    glw.viewport(0, 0, this.glw.canvas.width, this.glw.canvas.height);
+    glw.viewport(0, 0, glw.canvasW, glw.canvasH);
     this.renderToTextureActive = false;
   }
 
@@ -1331,7 +1331,10 @@ export class WebGlRenderer extends CoreRenderer {
   }
 
   updateViewport(): void {
-    this.glw.viewport(0, 0, this.glw.canvas.width, this.glw.canvas.height);
+    // Called after the canvas is resized (Renderer.updateAppDimensions) —
+    // refresh the wrapper's cached dimensions before they're used again.
+    this.glw.updateCanvasDimensions();
+    this.glw.viewport(0, 0, this.glw.canvasW, this.glw.canvasH);
   }
 
   removeRTTNode(node: CoreNode) {
