@@ -37,12 +37,88 @@ different from desktop — optimize against this model, not intuition:
 3. **Fill rate is the GPU wall.** Per-fragment cost = shader ALU + varying
    interpolation + blending bandwidth. Varyings that are constant across a
    quad are pure waste — compute them on the CPU and upload as uniforms.
-   Uniform-based branches are effectively free; quad-constant data through
-   interpolators is not.
+   Quad-constant data belongs in uniforms, not interpolators — but on the
+   Mali 400-class fragment pipeline even a uniform-driven branch serializes
+   (see GPU floor below): the cheapest dispatch on a uniform is a
+   compile-time `#define` shader variant (`getCacheMarkers`), then
+   `step()`/`mix()` arithmetic, and a runtime branch is last resort.
 4. **To find the bottleneck:** render at half-resolution backbuffer — if FPS
    jumps, you're fill-rate bound (attack shaders/overdraw); if not, trace
    CPU time in `drawFrame` vs the GPU process (attack GL call count and
    JS update work).
+
+### GPU floor: Mali 400-class / OpenGL ES 2.0 (READ BEFORE TOUCHING SHADERS)
+
+The GPU floor is **Mali 400-class silicon** (and comparable ES 2.0 parts:
+Vivante GC400, PowerVR SGX) — in-order, scalar fragment pipelines with strict
+GLSL ES 1.0 limits. Evaluate every shader decision against this baseline;
+modern GPUs are a bonus, not the target.
+
+**WebGL / GLSL hard constraints**
+
+- **WebGL 1.0 APIs only** in core paths. WebGL2 is opt-in via `forceWebGL2`
+  (default `false` — keep it that way). No `textureLod`, integer attributes,
+  MRT, or `gl.UNSIGNED_INT` indices in default paths.
+- **No `highp` in fragment shaders on Mali 400.** Always use the project's
+  `#ifdef GL_FRAGMENT_PRECISION_HIGH` guard (every existing fragment shader
+  has it). Never assume `highp` — and remember `mediump` is fp16: watch
+  precision when scaling texture coords against large atlas dimensions.
+- **Index buffers are `Uint16Array` / `gl.UNSIGNED_SHORT`.** `UNSIGNED_INT`
+  needs `OES_element_index_uint`, absent on Mali 400.
+- **Max 8 texture units; never index a sampler array with a non-constant.**
+  `texture2D(u_textures[int(v_index)], uv)` is GLSL ES 1.0 undefined
+  behavior and silently breaks on Mali drivers. Current shaders use a single
+  `u_texture` — keep it that way unless a compile-time-unrolled chain is used.
+- **Max 8 vec4 varying rows per program**, counted with the ES packing
+  algorithm (two `vec2`s share a row). `RoundedWithBorder*` already sits at
+  7/8 — do not add varyings to those shaders; pack or compute in-fragment.
+- **NPOT textures: `CLAMP_TO_EDGE`, no mipmaps** (WebGL1 spec; already
+  enforced in `WebGlCtxTexture`).
+- **No `dFdx`/`dFdy`/`fwidth`** without an `OES_standard_derivatives` check;
+  none in core shaders today — keep it that way.
+
+**Branching in fragment shaders (CRITICAL)**
+
+Mali 400's fragment pipeline has no real dynamic branching: any `if`, `else`,
+or `?:` serializes both paths for the batch — including branches on uniforms.
+This is a frame-time concern, not style.
+
+- **No `if`/`else`/`?:` in fragment shaders.** Use `step()`/`mix()`/`clamp()`
+  arithmetic. Reference: the branchless quadrant-radius select in
+  [Rounded.ts](src/core/shaders/webgl/Rounded.ts) (`step` + nested `mix`)
+  replaces the ternary `roundedBox` pattern.
+- **Uniform-driven mode switches** belong in compile-time `#define` shader
+  variants via `getCacheMarkers` (see LinearGradient's `colors:N` marker) —
+  the program cache keys on it, so each variant compiles once.
+- **No `discard`** — kills early-Z and stalls the tile pipeline. Output
+  alpha-zero via `mix()` instead.
+- **Loop bounds must be compile-time constants** (literal or `#define`).
+- **Every non-void GLSL function returns on every path** — a missing final
+  `return` is GLSL ES 1.0 undefined behavior and renders garbage on Mali.
+- **Worst offender ranking** when reviewing: varying-driven branch (diverges
+  per fragment) > data/texture-driven branch > uniform branch. All are
+  violations; fix the leftmost first.
+
+**CPU-side WebGL rules for tile-based GPUs**
+
+- **FBO switches force a tile resolve + reload.** Batch all render-to-texture
+  work at the start of the frame (`renderRTTNodes` already does this — one
+  pass over dirty RTT targets, then a single `bindFramebuffer(null)`); never
+  interleave RTT with main-framebuffer draws.
+- **Draw calls cost CPU dispatch** (see cost model above — command-buffer
+  serialization), not a per-call tile flush. Reduce total GL calls first;
+  merging draw calls alone measured no FPS change.
+- **No `gl.getError()` or `readPixels` in the frame loop** — both force a
+  CPU↔GPU sync. The pattern to copy: the OOM probe drains `getError()` only
+  on the active→idle transition ([WebPlatform.ts](src/core/platforms/web/WebPlatform.ts)),
+  and `readPixels` appears only in one-time startup probes.
+- **Context attributes** (see `createWebGLContext` in [src/utils.ts](src/utils.ts)):
+  `antialias: false` (AA is done in-shader with `smoothstep` SDF edges — a
+  2D UI has no use for MSAA, and its resolve still costs tile bandwidth),
+  `preserveDrawingBuffer: false` (true forces a full framebuffer copy per
+  frame on tilers), and request `depth`/`stencil` **only if a feature
+  actually uses them** — each enabled buffer costs tile memory bandwidth on
+  every flush.
 
 ### Caching layers and their invariants (do not break)
 
@@ -427,6 +503,13 @@ Before submitting code, verify:
 - [ ] Unit tests added for new code
 - [ ] Visual regression tests added for rendering features
 - [ ] All tests passing (`pnpm test`)
+- [ ] No `if`, `else`, or `?:` in fragment shaders — `step()`/`mix()`/`clamp()` arithmetic instead
+- [ ] Every non-void GLSL function returns on every code path
+- [ ] No `discard` in fragment shaders
+- [ ] No sampler array indexed by a varying or other non-compile-time-constant
+- [ ] Varying count ≤ 8 vec4 rows per shader program (ES packing rules)
+- [ ] Fragment shaders keep the `GL_FRAGMENT_PRECISION_HIGH` guard; no bare `highp`
+- [ ] No `gl.getError()`/`readPixels` in the frame loop; no FBO switches interleaved with main-pass draws
 
 ## Common Patterns to Follow
 
