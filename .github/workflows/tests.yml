@@ -4,7 +4,7 @@ on:
   merge_group:
     types: [checks_requested]
 jobs:
-  run-all-tests:
+  unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -41,11 +41,49 @@ jobs:
       - name: Run Unit Tests
         run: pnpm test
 
+  visual-regression-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        renderMode: [webgl, canvas]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - uses: actions/cache@v3
+        name: Setup pnpm cache
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
       - name: Install Playwright Browser
         run: cd visual-regression && pnpm exec playwright install chromium
 
-      - name: Run Visual Regression Tests
-        run: pnpm run test:visual --color -w 4
+      - name: Run Visual Regression Tests (${{ matrix.renderMode }})
+        run: pnpm run test:visual --color -w 4 --renderMode ${{ matrix.renderMode }}
         env:
           RUNTIME_ENV: ci
 
@@ -53,5 +91,5 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: failed-results
+          name: failed-results-${{ matrix.renderMode }}
           path: visual-regression/failed-results/
