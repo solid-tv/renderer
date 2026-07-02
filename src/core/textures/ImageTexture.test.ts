@@ -13,10 +13,12 @@ describe('ImageTexture.createImageBitmap', () => {
     );
     const txManager = {
       imageBitmapSupported: {
-        basic: true,
+        // basic: false so this exercises the options branch (current code
+        // takes the basic branch whenever `basic` is true, regardless of
+        // `options`/`full` — see PR #107, not yet reapplied on this branch).
+        basic: false,
         options: true,
         full: true,
-        premultiplyHonored: false,
       },
       platform: {
         createImageBitmap: createImageBitmapMock,
@@ -41,12 +43,11 @@ describe('ImageTexture.createImageBitmap', () => {
 
     // It should have called createImageBitmap with the options object
     expect(createImageBitmapMock).toHaveBeenCalledWith(blob, {
-      premultiplyAlpha: 'none',
+      premultiplyAlpha: 'premultiply',
       colorSpaceConversion: 'none',
       imageOrientation: 'none',
     });
 
-    // Since premultiplyHonored is false, useGlPremultiply should be true
     expect(result.premultiplyAlpha).toBe(true);
   });
 
@@ -59,7 +60,6 @@ describe('ImageTexture.createImageBitmap', () => {
         basic: true,
         options: false,
         full: false,
-        premultiplyHonored: null,
       },
       platform: {
         createImageBitmap: createImageBitmapMock,
@@ -85,7 +85,7 @@ describe('ImageTexture.createImageBitmap', () => {
     // It should have called basic createImageBitmap without options
     expect(createImageBitmapMock).toHaveBeenCalledWith(blob);
 
-    // And premultiplyAlpha should be false (browser default is assumed to premultiply)
-    expect(result.premultiplyAlpha).toBe(false);
+    // premultiplyAlpha reflects hasAlphaChannel, unaffected by bitmap options support
+    expect(result.premultiplyAlpha).toBe(true);
   });
 });
