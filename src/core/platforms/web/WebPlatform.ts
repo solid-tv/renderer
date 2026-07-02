@@ -29,9 +29,24 @@ export class WebPlatform extends Platform {
   override startLoop(stage: Stage): void {
     let isIdle = false;
     let lastFrameTime = 0;
+    // Set by `tick` once it has queued the next frame; read by `runLoop`'s catch
+    // so a throw after scheduling never double-schedules (which would compound
+    // into runaway frames if it threw every frame). Reset at the top of each frame.
+    let scheduled = false;
     const buffer = 4;
 
-    const runLoop = (currentTime: number = 0) => {
+    const requestLoop = () => requestAnimationFrame(runLoop);
+
+    // All per-frame work lives in `tick`, deliberately split out of `runLoop`.
+    // `runLoop` carries the try/catch that keeps the loop alive, and some
+    // optimizing compilers — notably Chrome 38's Crankshaft, our language floor —
+    // refuse to optimize any function that contains a try/catch. Keeping that
+    // guard in a near-empty shell confines the de-opt to the shell: every hot
+    // operation (the `stage.*` calls below, run every frame) stays in fully
+    // optimizable functions. `tick` is also where all client-supplied code runs
+    // (synchronous event subscribers, the events drained by `flushFrameEvents`,
+    // and animation steps) — i.e. everything that can actually throw.
+    const tick = (currentTime: number) => {
       // The GL context is lost and the engine does not rebuild it in place.
       // Stop the loop entirely (no reschedule) so we issue no GL calls against
       // a dead context. Recovery is via app reload (see the `contextLost` event).
@@ -55,6 +70,7 @@ export class WebPlatform extends Platform {
           } else {
             requestAnimationFrame(runLoop);
           }
+          scheduled = true;
           return;
         }
 
@@ -75,6 +91,7 @@ export class WebPlatform extends Platform {
         // This ensures we wake up slightly before the next frame to check for updates,
         // preventing us from missing a frame due to timer variances.
         setTimeout(requestLoop, Math.max(targetFrameTime, 15));
+        scheduled = true;
 
         if (isIdle === false) {
           // The render burst has settled. Probe for a GPU out-of-memory now
@@ -105,9 +122,29 @@ export class WebPlatform extends Platform {
 
       // Schedule next frame
       requestAnimationFrame(runLoop);
+      scheduled = true;
     };
 
-    const requestLoop = () => requestAnimationFrame(runLoop);
+    const runLoop = (currentTime: number = 0) => {
+      // `tick` runs client-supplied code every frame; a throw there would
+      // otherwise propagate out of the rAF callback and permanently stop the
+      // render loop — the whole app freezes until reload. Guard it and always
+      // keep the loop alive: hand the error to `handleLoopError` (a no-op by
+      // default; the app can override it to log/report) and reschedule unless
+      // `tick` already queued the next frame before throwing.
+      scheduled = false;
+      try {
+        tick(currentTime);
+      } catch (error: unknown) {
+        const handleLoopError = stage.options.handleLoopError;
+        if (handleLoopError !== undefined) {
+          handleLoopError(error);
+        }
+        if (scheduled === false) {
+          requestAnimationFrame(runLoop);
+        }
+      }
+    };
 
     requestAnimationFrame(runLoop);
   }

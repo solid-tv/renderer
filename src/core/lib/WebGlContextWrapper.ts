@@ -69,7 +69,18 @@ export class WebGlContextWrapper {
   //#endregion Vertex Array Objects
 
   //#region Canvas
-  public readonly canvas;
+  public readonly canvas: HTMLCanvasElement | OffscreenCanvas;
+  /**
+   * Cached copies of `canvas.width`/`canvas.height`.
+   *
+   * @remarks
+   * On HTMLCanvasElement these are DOM getters that cross into Blink — too
+   * slow to read per render op per frame on embedded targets. The canvas is
+   * only resized via Renderer.updateAppDimensions, which refreshes this cache
+   * through {@link updateCanvasDimensions}.
+   */
+  public canvasW: number;
+  public canvasH: number;
   //#endregion Canvas
 
   //#region WebGL Enums
@@ -170,6 +181,8 @@ export class WebGlContextWrapper {
     this.isWebGl2 = this.gl2 !== null;
 
     this.canvas = gl.canvas;
+    this.canvasW = gl.canvas.width;
+    this.canvasH = gl.canvas.height;
 
     // Extract GLenums
     this.MAX_RENDERBUFFER_SIZE = gl.MAX_RENDERBUFFER_SIZE;
@@ -445,6 +458,15 @@ export class WebGlContextWrapper {
    */
   viewport(x: GLint, y: GLint, width: GLsizei, height: GLsizei) {
     this.gl.viewport(x, y, width, height);
+  }
+
+  /**
+   * Refresh {@link canvasW}/{@link canvasH} from the canvas element.
+   * Must be called after the canvas is resized.
+   */
+  updateCanvasDimensions() {
+    this.canvasW = this.canvas.width;
+    this.canvasH = this.canvas.height;
   }
 
   /**
@@ -1188,6 +1210,22 @@ export class WebGlContextWrapper {
    */
   getError() {
     return this.gl.getError();
+  }
+
+  /**
+   * ```
+   * gl.isContextLost();
+   * ```
+   *
+   * @remarks
+   * Reports the current lost state directly and is not consumed like
+   * `getError()` (whose `CONTEXT_LOST_WEBGL` flag is cleared on first read).
+   * Use this to detect a lost context after a GL call has already failed.
+   *
+   * @returns
+   */
+  isContextLost() {
+    return this.gl.isContextLost();
   }
 
   /**

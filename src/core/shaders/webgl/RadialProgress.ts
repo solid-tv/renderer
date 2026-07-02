@@ -6,6 +6,7 @@ import {
 } from '../templates/RadialProgressTemplate.js';
 import type { WebGlShaderType } from '../../renderers/webgl/WebGlShaderNode.js';
 import type { WebGlRenderer } from '../../renderers/webgl/WebGlRenderer.js';
+import { genGradientColors } from '../../renderers/webgl/internal/ShaderUtils.js';
 
 export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
   props: RadialProgressTemplate.props,
@@ -57,7 +58,6 @@ export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
       # endif
 
       #define MAX_STOPS ${maxStops}
-      #define LAST_STOP ${maxStops - 1}
       #define CAP_ROUND ${props.cap}
       #define HAS_TRACK ${props.trackColor !== 0 ? 1 : 0}
 
@@ -87,22 +87,8 @@ export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
 
       vec4 getGradientColor(float dist) {
         dist = clamp(dist, 0.0, 1.0);
-
-        if (dist <= u_stops[0]) {
-          return u_colors[0];
-        }
-        if (dist >= u_stops[LAST_STOP]) {
-          return u_colors[LAST_STOP];
-        }
-        for (int i = 0; i < LAST_STOP; i++) {
-          float left = u_stops[i];
-          float right = u_stops[i + 1];
-          if (dist >= left && dist <= right) {
-            float lDist = smoothstep(left, right, dist);
-            return mix(u_colors[i], u_colors[i + 1], lDist);
-          }
-        }
-        return u_colors[LAST_STOP];
+        ${genGradientColors(maxStops)}
+        return colorOut;
       }
 
       // Coverage of a disc centered at \`c\` with radius \`r\` at pixel \`p\` (with 1px AA)
@@ -116,9 +102,13 @@ export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
         // Effective progress: when u_duration > 0 the shader self-animates from
         // u_time, otherwise we use the static u_progress prop. countdown == 1
         // drains (1 -> 0), countdown == 0 fills (0 -> 1).
-        float cyclePos = u_duration > 0.0 ? fract(u_time / u_duration) : 0.0;
-        float animProgress = u_countdown > 0.5 ? 1.0 - cyclePos : cyclePos;
-        float progress = u_duration > 0.0 ? animProgress : u_progress;
+        // Branchless (Mali 400 serializes uniform branches): the mix()-guarded
+        // denominator keeps the division finite when u_duration == 0 -- a
+        // max()-clamped epsilon would overflow fp16 mediump to Inf/NaN.
+        float hasDuration = step(0.0001, u_duration);
+        float cyclePos = fract(u_time / mix(1.0, u_duration, hasDuration)) * hasDuration;
+        float animProgress = mix(cyclePos, 1.0 - cyclePos, step(0.5, u_countdown));
+        float progress = mix(u_progress, animProgress, hasDuration);
 
         vec2 p = v_nodeCoords.xy * u_dimensions - u_center;
         float dist = length(p);
@@ -135,7 +125,7 @@ export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
 
         // Filled arc coverage (1 if in filled arc, else 0). When progress >= 1 the
         // whole ring is filled regardless of \`t\` -- guards against the mod() seam.
-        float arcCoverage = progress >= 1.0 ? 1.0 : step(t, progress);
+        float arcCoverage = max(step(1.0, progress), step(t, progress));
         float fillCoverage = ringCoverage * arcCoverage;
 
         #if CAP_ROUND
@@ -151,8 +141,10 @@ export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
         #endif
 
         // Sample gradient. Normalize \`t\` to the *filled* portion so the gradient
-        // spans the visible arc end-to-end regardless of progress.
-        float gradT = progress > 0.0 ? clamp(t / progress, 0.0, 1.0) : 0.0;
+        // spans the visible arc end-to-end regardless of progress. mix()-guarded
+        // denominator: safe at progress == 0 without fp16 overflow.
+        float hasProgress = step(0.000001, progress);
+        float gradT = clamp(t / mix(1.0, progress, hasProgress), 0.0, 1.0) * hasProgress;
         vec4 fillCol = getGradientColor(gradT);
 
         // Composite: track under fill (if track enabled), both gated by ringCoverage.
@@ -170,6 +162,13 @@ export const RadialProgress: WebGlShaderType<RadialProgressProps> = {
         #else
           layer = fillPM * fillCoverage;
         #endif
+
+        // Apply node opacity to the introduced ring/track colors. They come
+        // from u_colors / u_trackColor and do not carry worldAlpha, so without
+        // this a fading RadialProgress node would keep its ring fully opaque.
+        // \`base\` already includes worldAlpha (via v_color), so it is left as-is
+        // to avoid double-applying. Scaling a premultiplied layer is valid.
+        layer *= u_alpha;
 
         // Premultiplied "over": out = src + dst*(1 - src.a). The output stays
         // visible on a fully-transparent \`base\` because layer brings its own alpha.

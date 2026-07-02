@@ -106,11 +106,10 @@ export const Shadow: WebGlShaderType<ShadowProps> = {
       float boxDist = box(v_boxUv, v_boxSize);
       float boxAlpha = 1.0 - smoothstep(v_boxSmooth.x, v_boxSmooth.y, boxDist);
 
-      vec4 resColor = vec4(0.0);
-      if (u_color.a > 0.0) {
-        float shadowDist = shadowBox(v_shadowBox, v_shadowSize, v_shadowRadius);
-        resColor = u_color * shadowDist;
-      }
+      // Branchless alpha gate -- Mali 400 serializes uniform branches; the
+      // step() zeroes the shadow term exactly when u_color.a == 0.
+      float shadowDist = shadowBox(v_shadowBox, v_shadowSize, v_shadowRadius);
+      vec4 resColor = u_color * (shadowDist * step(0.0001, u_color.a));
 
       resColor = mix(resColor, color, min(color.a, boxAlpha));
       gl_FragColor = resColor * u_alpha;

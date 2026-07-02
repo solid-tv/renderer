@@ -212,7 +212,7 @@ export class WebGlRenderer extends CoreRenderer {
       gl,
       options.disableVertexArrayObject,
     ));
-    glw.viewport(0, 0, options.canvas.width, options.canvas.height);
+    glw.viewport(0, 0, glw.canvasW, glw.canvasH);
 
     this.attachContextLossListeners(options.canvas);
 
@@ -385,7 +385,19 @@ export class WebGlRenderer extends CoreRenderer {
     shaderType: WebGlShaderType,
     props: Record<string, unknown>,
   ): WebGlShaderProgram {
-    return new WebGlShaderProgram(this, shaderType, props);
+    try {
+      return new WebGlShaderProgram(this, shaderType, props);
+    } catch (e) {
+      // A lost GL context makes shader creation/compilation fail synchronously
+      // (gl.createShader returns null -> CONTEXT_LOST_WEBGL). This can run on
+      // the app's reactive stack before the async `webglcontextlost` event is
+      // processed, so trip the flag here too. setContextLost() is idempotent
+      // and emits `contextLost` for consumers (recovery is an app reload).
+      if (this.glw.isContextLost() === true) {
+        this.stage.setContextLost();
+      }
+      throw e;
+    }
   }
 
   createShaderNode(
@@ -628,9 +640,21 @@ export class WebGlRenderer extends CoreRenderer {
       return true;
     }
 
-    // Check if the shader is the same
+    // Distinct shader nodes can still batch when they resolve to the same
+    // program and the value-key cache handed both the same uniform collection:
+    // collections are immutable after fill and shared by reference across
+    // equal value keys, so reference equality implies value equality. This is
+    // the common TV-rail case — many same-size cards, each app-created with
+    // its own shader node but equal props. Program identity is required
+    // because the value key does not include the shader type, so equal
+    // collections from different programs must not merge.
     if (curShader !== shader) {
-      return false;
+      if (
+        curShader.program !== shader.program ||
+        curShader.uniforms !== shader.uniforms
+      ) {
+        return false;
+      }
     }
 
     if (
@@ -1252,7 +1276,7 @@ export class WebGlRenderer extends CoreRenderer {
     // Bind the default framebuffer
     glw.bindFramebuffer(null);
 
-    glw.viewport(0, 0, this.glw.canvas.width, this.glw.canvas.height);
+    glw.viewport(0, 0, glw.canvasW, glw.canvasH);
     this.renderToTextureActive = false;
   }
 
@@ -1319,7 +1343,10 @@ export class WebGlRenderer extends CoreRenderer {
   }
 
   updateViewport(): void {
-    this.glw.viewport(0, 0, this.glw.canvas.width, this.glw.canvas.height);
+    // Called after the canvas is resized (Renderer.updateAppDimensions) —
+    // refresh the wrapper's cached dimensions before they're used again.
+    this.glw.updateCanvasDimensions();
+    this.glw.viewport(0, 0, this.glw.canvasW, this.glw.canvasH);
   }
 
   removeRTTNode(node: CoreNode) {

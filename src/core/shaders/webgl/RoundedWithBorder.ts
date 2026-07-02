@@ -64,6 +64,15 @@ export const RoundedWithBorder: WebGlShaderType<RoundedWithBorderProps> = {
       v_innerSize = vec2(0.0);
       v_outerSize = vec2(0.0);
 
+      // Defaults for the zero-border case: the fragment shader is branchless
+      // and always evaluates the border SDFs, so every varying must carry a
+      // finite value (an unwritten varying is undefined and can poison the
+      // final mix() with NaN).
+      v_outerBorderUv = vec2(0.0);
+      v_innerBorderUv = vec2(0.0);
+      v_outerBorderRadius = u_radius;
+      v_innerBorderRadius = u_radius;
+
       if(borderZero == 0.0) {
         vec4 adjustedBorderWidth = u_borderWidth - 1.0 + clamp(u_borderWidth, -1.0, 1.0);
 
@@ -71,9 +80,6 @@ export const RoundedWithBorder: WebGlShaderType<RoundedWithBorderProps> = {
         float borderRight = adjustedBorderWidth.y;
         float borderBottom = adjustedBorderWidth.z;
         float borderLeft = adjustedBorderWidth.w;
-
-        v_outerBorderUv = vec2(0.0);
-        v_innerBorderUv = vec2(0.0);
 
         vec2 borderSize = vec2(borderRight + borderLeft, borderTop + borderBottom);
         vec2 extraSize = borderSize * u_borderAlign;
@@ -159,52 +165,49 @@ export const RoundedWithBorder: WebGlShaderType<RoundedWithBorderProps> = {
     varying vec4 v_outerBorderRadius;
     varying vec2 v_halfDimensions;
 
+    // Branchless quadrant radius select (r: x TL, y TR, z BR, w BL) --
+    // Mali 400-class fragment pipelines serialize any branch, ternaries included.
+    float quadRadius(vec2 p, vec4 r) {
+      vec2 stepVal = step(vec2(0.0), p);
+      return mix(mix(r.x, r.y, stepVal.x), mix(r.w, r.z, stepVal.x), stepVal.y);
+    }
+
     float roundedBox(vec2 p, vec2 s, vec4 r) {
-      r.xy = (p.x > 0.0) ? r.yz : r.xw;
-      r.x = (p.y > 0.0) ? r.y : r.x;
-      vec2 q = abs(p) - s + r.x;
-      return (min(max(q.x, q.y), 0.0) + length(max(q, 0.0))) - r.x;
+      float rad = quadRadius(p, r);
+      vec2 q = abs(p) - s + rad;
+      return (min(max(q.x, q.y), 0.0) + length(max(q, 0.0))) - rad;
     }
 
     void main() {
       vec4 color = texture2D(u_texture, v_textureCoords) * v_color;
-      vec4 resultColor = vec4(0.0);
       vec2 boxUv = v_nodeCoords.xy * u_dimensions - v_halfDimensions;
       float borderZero = 1.0 - step(0.001, dot(abs(u_borderWidth), vec4(1.0)));
       float edgeWidth = 1.0 / u_pixelRatio;
 
-      float nodeDist;
-      float nodeAlpha;
-
-      if(borderZero == 1.0) {
-        nodeDist = roundedBox(boxUv, v_halfDimensions - edgeWidth, u_radius);
-        nodeAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, nodeDist);
-        gl_FragColor = (color * nodeAlpha) * u_alpha;
-        return;
-      }
+      float nodeDist = roundedBox(boxUv, v_halfDimensions - edgeWidth, u_radius);
+      float nodeAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, nodeDist);
 
       float outerDist = roundedBox(boxUv + v_outerBorderUv, v_outerSize - edgeWidth, v_outerBorderRadius);
       float innerDist = roundedBox(boxUv + v_innerBorderUv, v_innerSize - edgeWidth, v_innerBorderRadius);
-
-      if(u_borderGap == 0.0) {
-        float outerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, outerDist);
-        float innerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, innerDist);
-        resultColor = mix(resultColor, u_borderColor, outerAlpha * u_borderColor.a);
-        resultColor = mix(resultColor, color, innerAlpha);
-        gl_FragColor = resultColor * u_alpha;
-        return;
-      }
-
-      nodeDist = roundedBox(boxUv, v_halfDimensions - edgeWidth, u_radius);
-      nodeAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, nodeDist);
+      float outerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, outerDist);
       float innerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, innerDist);
-      float gapAlpha = max(0.0, innerAlpha - nodeAlpha);
 
+      float gapAlpha = max(0.0, innerAlpha - nodeAlpha);
       float borderDist = max(-innerDist, outerDist);
       float borderAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, borderDist);
 
-      resultColor = (color * nodeAlpha) + (u_fillColor * gapAlpha);
-      resultColor = mix(resultColor, u_borderColor, borderAlpha * u_borderColor.a);
+      // Branchless path select -- Mali 400 serializes uniform branches, so all
+      // three composites (no gap / gap / zero border) are computed and
+      // mix()-selected instead of if/else'd.
+      vec4 resNoGap = mix(vec4(0.0), u_borderColor, outerAlpha * u_borderColor.a);
+      resNoGap = mix(resNoGap, color, innerAlpha);
+
+      vec4 resGap = (color * nodeAlpha) + (u_fillColor * gapAlpha);
+      resGap = mix(resGap, u_borderColor, borderAlpha * u_borderColor.a);
+
+      float hasGap = step(0.0001, abs(u_borderGap));
+      vec4 resultColor = mix(resNoGap, resGap, hasGap);
+      resultColor = mix(resultColor, color * nodeAlpha, borderZero);
       gl_FragColor = resultColor * u_alpha;
     }
   `,

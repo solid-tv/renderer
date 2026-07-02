@@ -46,6 +46,7 @@ export * from '../src/core/shaders/templates/HolePunchTemplate.js';
 export * from '../src/core/shaders/templates/RoundedTemplate.js';
 export * from '../src/core/shaders/templates/ShadowTemplate.js';
 export * from '../src/core/shaders/templates/LinearGradientTemplate.js';
+export * from '../src/core/shaders/templates/EdgeFadeTemplate.js';
 export * from '../src/core/shaders/templates/RadialGradientTemplate.js';
 
 // Shaders

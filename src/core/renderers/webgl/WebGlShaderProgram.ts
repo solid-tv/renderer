@@ -158,39 +158,51 @@ export class WebGlShaderProgram implements CoreShaderProgram {
       return this.lifecycle.canBatch(node, currentRenderOp);
     }
 
-    const { time, worldAlpha, w, h } = node;
-
+    // Read node getters only for the system uniforms this program actually
+    // uses — node.time in particular is a getter that runs per call.
     if (this.useTimeValue === true) {
-      if (time !== currentRenderOp.time) {
+      if (node.time !== currentRenderOp.time) {
         return false;
       }
     }
 
     if (this.useSystemAlpha === true) {
-      if (worldAlpha !== currentRenderOp.worldAlpha) {
+      if (node.worldAlpha !== currentRenderOp.worldAlpha) {
         return false;
       }
     }
 
     if (this.useSystemDimensions === true) {
-      if (w !== currentRenderOp.w || h !== currentRenderOp.h) {
+      if (node.w !== currentRenderOp.w || node.h !== currentRenderOp.h) {
         return false;
       }
     }
 
-    let shaderPropsA: Record<string, unknown> | undefined = undefined;
-    let shaderPropsB: Record<string, unknown> | undefined = undefined;
+    const shader = node.props.shader as WebGlShaderNode | null;
+    const opShader = currentRenderOp.shader as WebGlShaderNode | null;
 
-    const shader = node.props.shader;
-
-    if (shader !== null) {
-      shaderPropsA = (shader as WebGlShaderNode).resolvedProps;
+    // Same shader node — same resolved props by definition.
+    if (shader === opShader) {
+      return true;
     }
 
-    const opShader = currentRenderOp.shader;
-    if (opShader !== null) {
-      shaderPropsB = (opShader as WebGlShaderNode).resolvedProps;
+    if (shader === null || opShader === null) {
+      return false;
     }
+
+    // Shader nodes with equal value keys share their uniform collection by
+    // reference (see WebGlShaderNode.update); reference equality implies the
+    // resolved prop values match without a key-by-key compare.
+    if (shader.uniforms === opShader.uniforms) {
+      return true;
+    }
+
+    const shaderPropsA = shader.resolvedProps as
+      | Record<string, unknown>
+      | undefined;
+    const shaderPropsB = opShader.resolvedProps as
+      | Record<string, unknown>
+      | undefined;
 
     if (
       (shaderPropsA === undefined && shaderPropsB !== undefined) ||
@@ -243,8 +255,8 @@ export class WebGlShaderProgram implements CoreShaderProgram {
       resolutionH = framebufferDimensions.h;
     } else {
       pixelRatio = renderOp.stage.pixelRatio;
-      resolutionW = this.glw.canvas.width;
-      resolutionH = this.glw.canvas.height;
+      resolutionW = this.glw.canvasW;
+      resolutionH = this.glw.canvasH;
     }
 
     if (pixelRatio !== this.lastPixelRatio) {

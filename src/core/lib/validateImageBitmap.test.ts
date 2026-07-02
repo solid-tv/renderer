@@ -44,6 +44,10 @@ function createFakeGl(readbackRed: number, framebufferComplete = true) {
     ),
     deleteFramebuffer: vi.fn(),
     deleteTexture: vi.fn(),
+    // The probe releases its throwaway context via WEBGL_lose_context once done.
+    getExtension: vi.fn((name: string) =>
+      name === 'WEBGL_lose_context' ? { loseContext: vi.fn() } : null,
+    ),
   };
 }
 
@@ -115,5 +119,16 @@ describe('detectPremultiplyAlphaHonored', () => {
       gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,
       false,
     );
+  });
+
+  it('releases the throwaway context so it does not leak a GL slot', async () => {
+    const lose = { loseContext: vi.fn() };
+    const gl = createFakeGl(128);
+    gl.getExtension = vi.fn((name: string) =>
+      name === 'WEBGL_lose_context' ? lose : null,
+    );
+    await detectPremultiplyAlphaHonored(createPlatform(gl));
+    expect(gl.getExtension).toHaveBeenCalledWith('WEBGL_lose_context');
+    expect(lose.loseContext).toHaveBeenCalledTimes(1);
   });
 });
