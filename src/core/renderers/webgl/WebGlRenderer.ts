@@ -640,9 +640,21 @@ export class WebGlRenderer extends CoreRenderer {
       return true;
     }
 
-    // Check if the shader is the same
+    // Distinct shader nodes can still batch when they resolve to the same
+    // program and the value-key cache handed both the same uniform collection:
+    // collections are immutable after fill and shared by reference across
+    // equal value keys, so reference equality implies value equality. This is
+    // the common TV-rail case — many same-size cards, each app-created with
+    // its own shader node but equal props. Program identity is required
+    // because the value key does not include the shader type, so equal
+    // collections from different programs must not merge.
     if (curShader !== shader) {
-      return false;
+      if (
+        curShader.program !== shader.program ||
+        curShader.uniforms !== shader.uniforms
+      ) {
+        return false;
+      }
     }
 
     if (
