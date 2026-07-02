@@ -28,7 +28,8 @@ export async function automation(settings: ExampleSettings) {
 }
 
 export default async function test(settings: ExampleSettings) {
-  const { testName, renderer, appElement, automation, testRoot } = settings;
+  const { testName, renderer, appElement, automation, testRoot, renderMode } =
+    settings;
   const savedState = automation
     ? null
     : loadStorage<LocalStorageData>(testName);
@@ -366,63 +367,66 @@ export default async function test(settings: ExampleSettings) {
 
     curY += 30 + PADDING;
 
-    const SDF_TEXT = 'This "SDF" text should appear invisible';
+    // The SDF text renderer is not registered in canvas render mode
+    if (renderMode === 'webgl') {
+      const SDF_TEXT = 'This "SDF" text should appear invisible';
 
-    // SDF Text - Same Color - 100% alpha prop / 100% alpha component
-    renderer.createTextNode({
-      text: SDF_TEXT,
-      fontFamily: 'Ubuntu',
-      fontSize: 30,
-      alpha: 1,
-      color: bgColor,
-      y: curY,
-      textRendererOverride: 'sdf',
-      parent: sideContainer,
-    });
+      // SDF Text - Same Color - 100% alpha prop / 100% alpha component
+      renderer.createTextNode({
+        text: SDF_TEXT,
+        fontFamily: 'Ubuntu',
+        fontSize: 30,
+        alpha: 1,
+        color: bgColor,
+        y: curY,
+        textRendererOverride: 'sdf',
+        parent: sideContainer,
+      });
 
-    curY += 30 + PADDING;
+      curY += 30 + PADDING;
 
-    // SDF Text - Same Color - 50% alpha prop / 100% alpha component
-    renderer.createTextNode({
-      text: SDF_TEXT,
-      fontFamily: 'Ubuntu',
-      fontSize: 30,
-      alpha: 0.5,
-      color: bgColor,
-      y: curY,
-      textRendererOverride: 'sdf',
-      parent: sideContainer,
-    });
+      // SDF Text - Same Color - 50% alpha prop / 100% alpha component
+      renderer.createTextNode({
+        text: SDF_TEXT,
+        fontFamily: 'Ubuntu',
+        fontSize: 30,
+        alpha: 0.5,
+        color: bgColor,
+        y: curY,
+        textRendererOverride: 'sdf',
+        parent: sideContainer,
+      });
 
-    curY += 30 + PADDING;
+      curY += 30 + PADDING;
 
-    // SDF Text - Same Color - 100% alpha prop / 50% alpha component
-    renderer.createTextNode({
-      text: SDF_TEXT,
-      fontFamily: 'Ubuntu',
-      fontSize: 30,
-      alpha: 1,
-      color: mergeColorAlpha(bgColor, 0.5),
-      y: curY,
-      textRendererOverride: 'sdf',
-      parent: sideContainer,
-    });
+      // SDF Text - Same Color - 100% alpha prop / 50% alpha component
+      renderer.createTextNode({
+        text: SDF_TEXT,
+        fontFamily: 'Ubuntu',
+        fontSize: 30,
+        alpha: 1,
+        color: mergeColorAlpha(bgColor, 0.5),
+        y: curY,
+        textRendererOverride: 'sdf',
+        parent: sideContainer,
+      });
 
-    curY += 30 + PADDING;
+      curY += 30 + PADDING;
 
-    // SDF Text - Same Color - 50% alpha prop / 50% alpha component
-    renderer.createTextNode({
-      text: SDF_TEXT,
-      fontFamily: 'Ubuntu',
-      fontSize: 30,
-      alpha: 0.5,
-      color: mergeColorAlpha(bgColor, 0.5),
-      y: curY,
-      textRendererOverride: 'sdf',
-      parent: sideContainer,
-    });
+      // SDF Text - Same Color - 50% alpha prop / 50% alpha component
+      renderer.createTextNode({
+        text: SDF_TEXT,
+        fontFamily: 'Ubuntu',
+        fontSize: 30,
+        alpha: 0.5,
+        color: mergeColorAlpha(bgColor, 0.5),
+        y: curY,
+        textRendererOverride: 'sdf',
+        parent: sideContainer,
+      });
 
-    curY += 30 + PADDING;
+      curY += 30 + PADDING;
+    }
 
     //// Texture Blending Test
 

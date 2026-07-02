@@ -10,7 +10,7 @@ export async function automation(settings: ExampleSettings) {
 }
 
 export default async function test(settings: ExampleSettings) {
-  const { renderer, testRoot } = settings;
+  const { renderer, renderMode, testRoot } = settings;
   const pageContainer = new PageContainer(settings, {
     w: renderer.settings.appWidth,
     h: renderer.settings.appHeight,
@@ -19,9 +19,13 @@ export default async function test(settings: ExampleSettings) {
   });
 
   await paginateTestRows(pageContainer, [
-    ...generateScalingTest(renderer, 'sdf', 'scale'),
-    ...generateScalingTest(renderer, 'sdf', 'scaleX'),
-    ...generateScalingTest(renderer, 'sdf', 'scaleY'),
+    ...(renderMode === 'webgl'
+      ? [
+          ...generateScalingTest(renderer, 'sdf', 'scale'),
+          ...generateScalingTest(renderer, 'sdf', 'scaleX'),
+          ...generateScalingTest(renderer, 'sdf', 'scaleY'),
+        ]
+      : []),
     ...generateScalingTest(renderer, 'canvas', 'scale'),
     ...generateScalingTest(renderer, 'canvas', 'scaleX'),
     ...generateScalingTest(renderer, 'canvas', 'scaleY'),

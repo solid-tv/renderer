@@ -130,7 +130,11 @@ export default async function test({
   testRoot,
   perfMultiplier,
   automation,
+  renderMode,
 }: ExampleSettings) {
+  // The SDF text renderer is not registered in canvas render mode — fall back
+  // to canvas text there so the HUD/debug text still renders.
+  const textRenderer = renderMode === 'canvas' ? 'canvas' : 'sdf';
   const params = new URLSearchParams(window.location.search);
   const targetFps = Number(params.get('targetfps') ?? 10);
   const vaoOff = params.get('novao') === 'true';
@@ -178,7 +182,7 @@ export default async function test({
     x: 20,
     y: APP_H - 90,
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf', // never Canvas here — it re-rasterizes per edit and OOMs TVs
+    textRendererOverride: textRenderer, // sdf on webgl — Canvas text re-rasterizes per edit and OOMs TVs
     fontSize: 26,
     lineHeight: 32,
     color: 0xffffffff,
@@ -307,7 +311,7 @@ export default async function test({
     w: 580,
     contain: 'width',
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
+    textRendererOverride: textRenderer,
     fontSize: 26,
     lineHeight: 30,
     color: 0x33ff88ff,
@@ -377,7 +381,7 @@ export default async function test({
     x: APP_W - FPS_W + 16,
     y: 8,
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
+    textRendererOverride: textRenderer,
     fontSize: 32,
     lineHeight: 38,
     color: 0x33ff88ff,
@@ -489,7 +493,7 @@ export default async function test({
     w: 820,
     contain: 'width',
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
+    textRendererOverride: textRenderer,
     fontSize: 34,
     lineHeight: 48,
     color: 0xffffffff,
@@ -520,7 +524,7 @@ export default async function test({
     w: 760,
     contain: 'width',
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
+    textRendererOverride: textRenderer,
     fontSize: 24,
     lineHeight: 32,
     color: 0x9fb4d8ff, // slate-300 (0xRRGGBBAA)
@@ -548,7 +552,7 @@ export default async function test({
     w: 820,
     contain: 'width',
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
+    textRendererOverride: textRenderer,
     fontSize: 26,
     lineHeight: 34,
     color: 0x33ff88ff,
@@ -564,7 +568,7 @@ export default async function test({
     w: 820,
     contain: 'width',
     fontFamily: 'Ubuntu',
-    textRendererOverride: 'sdf',
+    textRendererOverride: textRenderer,
     fontSize: 20,
     lineHeight: 28,
     color: 0x94a3b8ff, // slate-400 (0xRRGGBBAA)

@@ -29,6 +29,12 @@ interface TestModule {
     urlParams: URLSearchParams,
   ) => Partial<RendererMainSettings>;
   automation?: (settings: ExampleSettings) => Promise<void>;
+  /**
+   * Render modes this test's automation supports. Defaults to all modes.
+   * Set to `['webgl']` for tests exercising features the Canvas2D backend
+   * does not implement (e.g. render-to-texture).
+   */
+  renderModes?: ('webgl' | 'canvas')[];
 }
 
 const getTestPath = (testName: string) => `./tests/${testName}.ts`;
@@ -296,6 +302,7 @@ async function runTest(
 
   const exampleSettings: ExampleSettings = {
     testName: test,
+    renderMode: renderMode as 'webgl' | 'canvas',
     renderer,
     appElement,
     testRoot,
@@ -491,7 +498,16 @@ async function runAutomation(
     // results in automation mode.
     await setupMathRandom();
 
-    const { automation, customSettings } = await testModule();
+    const { automation, customSettings, renderModes } = await testModule();
+    if (
+      renderModes !== undefined &&
+      renderModes.indexOf(renderMode as 'webgl' | 'canvas') === -1
+    ) {
+      console.log(
+        `Skipping ${testName} (not enabled for renderMode=${renderMode})`,
+      );
+      continue;
+    }
     console.log(`Attempting to run automation for ${testName}...`);
     if (automation) {
       console.log(`Running automation for ${testName}...`);
@@ -509,6 +525,7 @@ async function runAutomation(
         });
         const exampleSettings: ExampleSettings = {
           testName,
+          renderMode: renderMode as 'webgl' | 'canvas',
           renderer,
           testRoot,
           appElement,

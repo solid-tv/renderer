@@ -13,7 +13,11 @@ export async function automation(settings: ExampleSettings) {
  * container that uses mount/autosize. If parent dimensions change from initial
  * frame to loaded frame, its mount translation can cause a visible jump.
  */
-export default async function test({ renderer, testRoot }: ExampleSettings) {
+export default async function test({
+  renderer,
+  testRoot,
+  renderMode,
+}: ExampleSettings) {
   testRoot.w = 900;
   testRoot.h = 360;
   testRoot.color = 0xffffffff;
@@ -28,13 +32,15 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     parent: testRoot,
   });
 
-  await runCase({
-    renderer,
-    testRoot,
-    y: 120,
-    rendererType: 'sdf',
-    label: 'SDF',
-  });
+  if (renderMode === 'webgl') {
+    await runCase({
+      renderer,
+      testRoot,
+      y: 120,
+      rendererType: 'sdf',
+      label: 'SDF',
+    });
+  }
 
   await runCase({
     renderer,

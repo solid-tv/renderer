@@ -10,7 +10,7 @@ export async function automation(settings: ExampleSettings) {
 }
 
 export default async function test(settings: ExampleSettings) {
-  const { renderer } = settings;
+  const { renderer, renderMode } = settings;
   const pageContainer = new PageContainer(settings, {
     w: renderer.settings.appWidth,
     h: renderer.settings.appHeight,
@@ -18,10 +18,10 @@ export default async function test(settings: ExampleSettings) {
   });
 
   await paginateTestRows(pageContainer, [
-    ...generateWordBreakTest(renderer, 'sdf', 4),
-    ...generateWordBreakTest(renderer, 'sdf', 3),
-    ...generateWordBreakTest(renderer, 'sdf', 2),
-    ...generateWordBreakTest(renderer, 'sdf', 1),
+    ...generateWordBreakTest(renderer, renderMode, 'sdf', 4),
+    ...generateWordBreakTest(renderer, renderMode, 'sdf', 3),
+    ...generateWordBreakTest(renderer, renderMode, 'sdf', 2),
+    ...generateWordBreakTest(renderer, renderMode, 'sdf', 1),
   ]);
 
   return pageContainer;
@@ -44,6 +44,7 @@ const NODE_PROPS = {
 
 function generateWordBreakTest(
   renderer: RendererMain,
+  renderMode: 'webgl' | 'canvas',
   textRenderer: 'canvas' | 'sdf',
   maxLines: number,
 ): TestRow[] {
@@ -69,12 +70,16 @@ function generateWordBreakTest(
             containerHeight,
           },
           [
-            'Renderer: sdf',
-            renderer.createTextNode({
-              ...nodeProps,
-              maxLines,
-              textRendererOverride: 'sdf',
-            }),
+            ...(renderMode === 'webgl'
+              ? [
+                  'Renderer: sdf',
+                  renderer.createTextNode({
+                    ...nodeProps,
+                    maxLines,
+                    textRendererOverride: 'sdf',
+                  }),
+                ]
+              : []),
             'Renderer: canvas',
             renderer.createTextNode({
               ...nodeProps,
@@ -102,13 +107,17 @@ function generateWordBreakTest(
             containerHeight,
           },
           [
-            'Renderer: sdf',
-            renderer.createTextNode({
-              ...nodeProps,
-              maxLines,
-              wordBreak: 'break-all',
-              textRendererOverride: 'sdf',
-            }),
+            ...(renderMode === 'webgl'
+              ? [
+                  'Renderer: sdf',
+                  renderer.createTextNode({
+                    ...nodeProps,
+                    maxLines,
+                    wordBreak: 'break-all',
+                    textRendererOverride: 'sdf',
+                  }),
+                ]
+              : []),
             'Renderer: canvas',
             renderer.createTextNode({
               ...nodeProps,
@@ -137,13 +146,17 @@ function generateWordBreakTest(
             containerHeight,
           },
           [
-            'Renderer: sdf',
-            renderer.createTextNode({
-              ...nodeProps,
-              maxLines,
-              wordBreak: 'break-word',
-              textRendererOverride: 'sdf',
-            }),
+            ...(renderMode === 'webgl'
+              ? [
+                  'Renderer: sdf',
+                  renderer.createTextNode({
+                    ...nodeProps,
+                    maxLines,
+                    wordBreak: 'break-word',
+                    textRendererOverride: 'sdf',
+                  }),
+                ]
+              : []),
             'Renderer: canvas',
             renderer.createTextNode({
               ...nodeProps,
