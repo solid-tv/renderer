@@ -133,6 +133,183 @@ describe('SdfTextRenderer layout cache', () => {
   });
 });
 
+describe('SdfTextRenderer renderQuads cache dispatch', () => {
+  type FakeRenderer = {
+    stage: unknown;
+    sdfBufferIdx: number;
+    fSdfBuffer: Float32Array;
+    addSdfQuads: ReturnType<typeof vi.fn>;
+    addSdfCachedQuads: ReturnType<typeof vi.fn>;
+    addSdfTranslatedQuads: ReturnType<typeof vi.fn>;
+  };
+
+  const GLYPHS = 2;
+
+  const makeRenderer = (): FakeRenderer => {
+    const renderer: FakeRenderer = {
+      stage: {
+        options: { textLayoutCacheSize: 10 },
+        shManager: {
+          registerShaderType: vi.fn(),
+          createShader: vi.fn(() => ({})),
+        },
+      },
+      sdfBufferIdx: 0,
+      fSdfBuffer: new Float32Array(1024),
+      // The miss path snapshots [startIdx, endIdx) of fSdfBuffer, so the
+      // fake must advance sdfBufferIdx like the real writer does.
+      addSdfQuads: vi.fn(() => {
+        renderer.sdfBufferIdx += GLYPHS * 24;
+      }),
+      addSdfCachedQuads: vi.fn(),
+      addSdfTranslatedQuads: vi.fn(),
+    };
+    return renderer;
+  };
+
+  const makeLayout = () => ({
+    glyphs: new Float32Array(GLYPHS * 8),
+    glyphCount: GLYPHS,
+    fontScale: 1,
+    distanceRange: 4,
+    width: 100,
+    height: 50,
+  });
+
+  const makeCache = () => ({
+    vertices: null as Float32Array | null,
+    glyphCount: 0,
+    color: 0,
+    alpha: -1,
+    transform: new Float32Array(6),
+    layoutRef: null as unknown,
+  });
+
+  const makeRenderProps = (
+    cache: ReturnType<typeof makeCache>,
+    transform: number[],
+  ) => ({
+    fontFamily: 'Test',
+    fontSize: 42,
+    color: 0xffffffff,
+    offsetY: 0,
+    worldAlpha: 1,
+    globalTransform: new Float32Array(transform),
+    clippingRect: { x: 0, y: 0, w: 0, h: 0, valid: false },
+    width: 100,
+    height: 50,
+    parentHasRenderTexture: false,
+    framebufferDimensions: null,
+    sdfCache: cache,
+  });
+
+  const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const TRANSLATED = [1, 0, 0, 0, 1, 0, 120, -40, 1];
+  const SCALED = [2, 0, 0, 0, 2, 0, 0, 0, 1];
+
+  const renderQuads = (
+    renderer: FakeRenderer,
+    layout: ReturnType<typeof makeLayout>,
+    renderProps: ReturnType<typeof makeRenderProps>,
+  ) =>
+    SdfTextRenderer.renderQuads(
+      renderer as never,
+      layout as never,
+      null as never,
+      renderProps as never,
+    );
+
+  const setupWithAtlas = () => {
+    initRenderer(10);
+    vi.mocked(SdfFontHandler.getAtlas).mockReturnValue({
+      ctxTexture: {},
+    } as never);
+  };
+
+  it('takes the miss path first and snapshots the cache', () => {
+    setupWithAtlas();
+    const renderer = makeRenderer();
+    const layout = makeLayout();
+    const cache = makeCache();
+
+    renderQuads(renderer, layout, makeRenderProps(cache, IDENTITY));
+
+    expect(renderer.addSdfQuads.mock.calls.length).toBe(1);
+    expect(cache.vertices).not.toBeNull();
+    expect(cache.layoutRef).toBe(layout);
+    expect(cache.glyphCount).toBe(GLYPHS);
+  });
+
+  it('takes the mem-copy path when nothing changed', () => {
+    setupWithAtlas();
+    const renderer = makeRenderer();
+    const layout = makeLayout();
+    const cache = makeCache();
+
+    renderQuads(renderer, layout, makeRenderProps(cache, IDENTITY));
+    renderQuads(renderer, layout, makeRenderProps(cache, IDENTITY));
+
+    expect(renderer.addSdfQuads.mock.calls.length).toBe(1);
+    expect(renderer.addSdfCachedQuads.mock.calls.length).toBe(1);
+    expect(renderer.addSdfTranslatedQuads.mock.calls.length).toBe(0);
+  });
+
+  it('takes the translation path when only tx/ty changed, keeping the cache base', () => {
+    setupWithAtlas();
+    const renderer = makeRenderer();
+    const layout = makeLayout();
+    const cache = makeCache();
+
+    renderQuads(renderer, layout, makeRenderProps(cache, IDENTITY));
+    const baseVertices = cache.vertices;
+
+    renderQuads(renderer, layout, makeRenderProps(cache, TRANSLATED));
+
+    expect(renderer.addSdfQuads.mock.calls.length).toBe(1);
+    expect(renderer.addSdfCachedQuads.mock.calls.length).toBe(0);
+    const calls = renderer.addSdfTranslatedQuads.mock.calls;
+    expect(calls.length).toBe(1);
+    // (cachedVertices, glyphCount, dx, dy, ...)
+    expect(calls[0]![0]).toBe(baseVertices);
+    expect(calls[0]![1]).toBe(GLYPHS);
+    expect(calls[0]![2]).toBe(120);
+    expect(calls[0]![3]).toBe(-40);
+    // The scroll path must not re-snapshot: base transform and vertices stay
+    expect(cache.vertices).toBe(baseVertices);
+    expect(cache.transform[4]).toBe(0);
+    expect(cache.transform[5]).toBe(0);
+  });
+
+  it('falls back to the miss path when scale or rotation changed', () => {
+    setupWithAtlas();
+    const renderer = makeRenderer();
+    const layout = makeLayout();
+    const cache = makeCache();
+
+    renderQuads(renderer, layout, makeRenderProps(cache, IDENTITY));
+    renderQuads(renderer, layout, makeRenderProps(cache, SCALED));
+
+    expect(renderer.addSdfQuads.mock.calls.length).toBe(2);
+    expect(renderer.addSdfTranslatedQuads.mock.calls.length).toBe(0);
+  });
+
+  it('falls back to the miss path when color or alpha changed', () => {
+    setupWithAtlas();
+    const renderer = makeRenderer();
+    const layout = makeLayout();
+    const cache = makeCache();
+
+    renderQuads(renderer, layout, makeRenderProps(cache, IDENTITY));
+
+    const faded = makeRenderProps(cache, TRANSLATED);
+    faded.worldAlpha = 0.5;
+    renderQuads(renderer, layout, faded);
+
+    expect(renderer.addSdfQuads.mock.calls.length).toBe(2);
+    expect(renderer.addSdfTranslatedQuads.mock.calls.length).toBe(0);
+  });
+});
+
 describe('SdfTextRenderer lazy shader compile', () => {
   it('registers the SDF shader at init but defers compilation', () => {
     const shManager = {
