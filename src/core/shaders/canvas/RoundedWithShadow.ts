@@ -49,9 +49,9 @@ export const RoundedWithShadow: CanvasShaderType<
       );
     }
 
-    const path = new Path2D();
-    render.roundRect(path, tx, ty, w, h, computed.radius);
-    ctx.clip(path);
+    ctx.beginPath();
+    render.roundRect(ctx, tx, ty, w, h, computed.radius);
+    ctx.clip();
     renderContext();
   },
 };

@@ -57,9 +57,9 @@ export function roundedRectWithBorder(
 
   //draw node content first
   ctx.save();
-  const path = new Path2D();
-  roundRect(path, x, y, width, height, radius);
-  ctx.clip(path);
+  ctx.beginPath();
+  roundRect(ctx, x, y, width, height, radius);
+  ctx.clip();
   renderContext();
   ctx.restore();
 
