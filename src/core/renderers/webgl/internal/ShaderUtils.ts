@@ -243,21 +243,22 @@ export const DefaultVertexSource = `
 `;
 
 /**
- * generate fragment source for
- * @param stops
- * @returns
+ * Generates branchless gradient-stop evaluation statements for a fragment
+ * shader. Expects a `float dist` in scope and `u_stops`/`u_colors` uniform
+ * arrays of length `stops`; leaves the result in `vec4 colorOut`.
+ *
+ * The accumulated `mix()` chain is exactly equivalent to selecting the
+ * segment containing `dist` (for ascending stops): below a segment the
+ * smoothstep is 0 (no-op), above it is 1 (fully replaced by the next color).
+ * No `if`/ternary — Mali 400-class fragment pipelines serialize any branch.
  */
 export function genGradientColors(stops: number): string {
-  let result = `
-    float stopCalc = (dist - u_stops[0]) / (u_stops[1] - u_stops[0]);
-    vec4 colorOut = mix(u_colors[0], u_colors[1], stopCalc);
-  `;
-  if (stops > 2) {
-    for (let i = 2; i < stops; i++) {
-      result += `colorOut = mix(colorOut, u_colors[${i}], clamp((dist - u_stops[${
-        i - 1
-      }]) / (u_stops[${i}] - u_stops[${i - 1}]), 0.0, 1.0));`;
-    }
+  let result = `vec4 colorOut = u_colors[0];`;
+  for (let i = 1; i < stops; i++) {
+    result += `
+      colorOut = mix(colorOut, u_colors[${i}], smoothstep(u_stops[${
+      i - 1
+    }], u_stops[${i}], dist));`;
   }
   return result;
 }

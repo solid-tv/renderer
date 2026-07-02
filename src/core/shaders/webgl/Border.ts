@@ -135,24 +135,25 @@ export const Border: WebGlShaderType<BorderProps> = {
       float outerDist = box(boxUv + v_outerBorderUv, v_outerSize - edgeWidth);
       float innerDist = box(boxUv + v_innerBorderUv, v_innerSize - edgeWidth);
 
-      if(u_borderGap == 0.0) {
-        float outerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, outerDist);
-        float innerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, innerDist);
-        resultColor = mix(resultColor, u_borderColor, outerAlpha * u_borderColor.a);
-        resultColor = mix(resultColor, color, innerAlpha);
-        gl_FragColor = resultColor * u_alpha;
-        return;
-      }
+      float outerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, outerDist);
+      float innerAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, innerDist);
 
       float nodeDist = box(boxUv, v_halfDimensions - edgeWidth);
       float nodeAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, nodeDist);
 
       float borderDist = max(-innerDist, outerDist);
       float borderAlpha = 1.0 - smoothstep(-0.5 * edgeWidth, 0.5 * edgeWidth, borderDist);
-      resultColor = mix(resultColor, color, nodeAlpha);
-      resultColor = mix(resultColor, u_borderColor, borderAlpha * u_borderColor.a);
 
-      gl_FragColor = resultColor * u_alpha;
+      // Branchless gap select -- Mali 400 serializes uniform branches, so both
+      // composites are computed and mix()-selected on hasGap instead.
+      vec4 resNoGap = mix(resultColor, u_borderColor, outerAlpha * u_borderColor.a);
+      resNoGap = mix(resNoGap, color, innerAlpha);
+
+      vec4 resGap = mix(resultColor, color, nodeAlpha);
+      resGap = mix(resGap, u_borderColor, borderAlpha * u_borderColor.a);
+
+      float hasGap = step(0.0001, abs(u_borderGap));
+      gl_FragColor = mix(resNoGap, resGap, hasGap) * u_alpha;
     }
   `,
 };

@@ -98,18 +98,23 @@ export const RoundedWithShadow: WebGlShaderType<RoundedWithShadowProps> = {
     varying vec4 v_shadowRadius;
     varying vec2 v_shadowSmooth;
 
+    // Branchless quadrant radius select (r: x TL, y TR, z BR, w BL) --
+    // Mali 400-class fragment pipelines serialize any branch, ternaries included.
+    float quadRadius(vec2 p, vec4 r) {
+      vec2 stepVal = step(vec2(0.0), p);
+      return mix(mix(r.x, r.y, stepVal.x), mix(r.w, r.z, stepVal.x), stepVal.y);
+    }
+
     float roundedBox(vec2 p, vec2 s, vec4 r) {
-      r.xy = (p.x > 0.0) ? r.yz : r.xw;
-      r.x = (p.y > 0.0) ? r.y : r.x;
-      vec2 q = abs(p) - s + r.x;
-      return (min(max(q.x, q.y), 0.0) + length(max(q, 0.0))) - r.x;
+      float rad = quadRadius(p, r);
+      vec2 q = abs(p) - s + rad;
+      return (min(max(q.x, q.y), 0.0) + length(max(q, 0.0))) - rad;
     }
 
     float shadowBox(vec2 p, vec2 s, vec4 r) {
-      r.xy = (p.x > 0.0) ? r.yz : r.xw;
-      r.x = (p.y > 0.0) ? r.y : r.x;
-      vec2 q = abs(p) - s + r.x;
-      float dist = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r.x;
+      float rad = quadRadius(p, r);
+      vec2 q = abs(p) - s + rad;
+      float dist = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - rad;
       return 1.0 - smoothstep(v_shadowSmooth.x, v_shadowSmooth.y, dist);
     }
 
@@ -119,11 +124,8 @@ export const RoundedWithShadow: WebGlShaderType<RoundedWithShadowProps> = {
       float boxDist = roundedBox(v_boxUv, v_boxSize, u_radius);
       float roundedAlpha = 1.0 - smoothstep(v_boxSmooth.x, v_boxSmooth.y, boxDist);
 
-      vec4 resColor = vec4(0.0);
-      if (u_shadow_color.a > 0.0) {
-        float shadowAlpha = shadowBox(v_shadowBox, v_shadowSize, v_shadowRadius);
-        resColor = u_shadow_color * shadowAlpha;
-      }
+      float shadowAlpha = shadowBox(v_shadowBox, v_shadowSize, v_shadowRadius);
+      vec4 resColor = u_shadow_color * (shadowAlpha * step(0.0001, u_shadow_color.a));
 
       resColor = mix(resColor, color, min(color.a, roundedAlpha));
       gl_FragColor = resColor * u_alpha;

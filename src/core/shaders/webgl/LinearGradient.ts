@@ -6,6 +6,7 @@ import {
 } from '../templates/LinearGradientTemplate.js';
 import type { WebGlRenderer } from '../../renderers/webgl/WebGlRenderer.js';
 import type { WebGlShaderType } from '../../renderers/webgl/WebGlShaderNode.js';
+import { genGradientColors } from '../../renderers/webgl/internal/ShaderUtils.js';
 
 export const LinearGradient: WebGlShaderType<LinearGradientProps> = {
   props: LinearGradientTemplate.props,
@@ -56,7 +57,6 @@ export const LinearGradient: WebGlShaderType<LinearGradientProps> = {
     # endif
 
     #define MAX_STOPS ${props.colors.length}
-    #define LAST_STOP ${props.colors.length - 1}
 
     uniform float u_alpha;
 
@@ -72,24 +72,8 @@ export const LinearGradient: WebGlShaderType<LinearGradientProps> = {
 
     vec4 getGradientColor(float dist) {
       dist = clamp(dist, 0.0, 1.0);
-
-      if(dist <= u_stops[0]) {
-        return u_colors[0];
-      }
-
-      if(dist >= u_stops[LAST_STOP]) {
-        return u_colors[LAST_STOP];
-      }
-
-      for(int i = 0; i < LAST_STOP; i++) {
-        float left = u_stops[i];
-        float right = u_stops[i + 1];
-        if(dist >= left && dist <= right) {
-          float lDist = smoothstep(left, right, dist);
-          return mix(u_colors[i], u_colors[i + 1], lDist);
-        }
-      }
-      return u_colors[LAST_STOP];
+      ${genGradientColors(props.colors.length)}
+      return colorOut;
     }
 
     void main() {
