@@ -9,7 +9,7 @@ export function createWebGLContext(
     alpha: true,
     antialias: false,
     depth: false,
-    stencil: true,
+    stencil: false,
     desynchronized: false,
     // Disabled because it prevents Visual Regression Tests from working
     // failIfMajorPerformanceCaveat: true,
