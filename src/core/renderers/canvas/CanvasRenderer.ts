@@ -72,7 +72,7 @@ export class CanvasRenderer extends CoreRenderer {
       }
     }
 
-    const hasTransform = ta !== 1;
+    const hasTransform = ta !== 1 || td !== 1 || tb !== 0 || tc !== 0;
     const clippingValid = clippingRect.valid === true;
 
     // If the clipping rect is valid but zero-area, the node is fully clipped — skip rendering
