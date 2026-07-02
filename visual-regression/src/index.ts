@@ -104,10 +104,7 @@ const argv = yargs(hideBin(process.argv))
     renderMode: {
       type: 'string',
       alias: 'r',
-      // Defaults to webgl-only. Switch to 'all' (here or via --renderMode)
-      // once canvas baselines have been captured and committed, otherwise
-      // canvas compare runs fail for lack of reference snapshots.
-      default: 'webgl',
+      default: 'all',
       choices: ['webgl', 'canvas', 'all'],
       description:
         'Renderer mode to test ("webgl", "canvas", or "all" for both)',
