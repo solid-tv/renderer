@@ -46,11 +46,18 @@ export const HolePunch: WebGlShaderType<HolePunchProps> = {
     void main() {
       vec4 color = texture2D(u_texture, v_textureCoords) * v_color;
       vec2 p = (v_textureCoords.xy * u_dimensions.xy - u_pos) - u_size;
-      vec4 r = u_radius;
-      r.xy = (p.x > 0.0) ? r.yz : r.xw;
-      r.x = (p.y > 0.0) ? r.y : r.x;
-      p = abs(p) - u_size + r.x;
-      float dist = min(max(p.x, p.y), 0.0) + length(max(p, 0.0)) - r.x + 2.0;
+
+      // Branchless radius selection based on quadrant
+      // x: TL, y: TR, z: BR, w: BL
+      vec2 stepVal = step(vec2(0.0), p);
+      float r = mix(
+        mix(u_radius.x, u_radius.y, stepVal.x),
+        mix(u_radius.w, u_radius.z, stepVal.x),
+        stepVal.y
+      );
+
+      p = abs(p) - u_size + r;
+      float dist = min(max(p.x, p.y), 0.0) + length(max(p, 0.0)) - r + 2.0;
       float roundedAlpha = 1.0 - smoothstep(0.0, u_pixelRatio, dist);
       gl_FragColor = mix(color, vec4(0.0), min(color.a, roundedAlpha));
     }
