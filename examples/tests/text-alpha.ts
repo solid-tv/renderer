@@ -27,7 +27,7 @@ export async function automation(settings: ExampleSettings) {
 }
 
 export default async function test(settings: ExampleSettings) {
-  const { renderer, testRoot } = settings;
+  const { renderer, testRoot, renderMode } = settings;
   const pageContainer = new PageContainer(settings, {
     w: renderer.settings.appWidth,
     h: renderer.settings.appHeight,
@@ -36,7 +36,8 @@ export default async function test(settings: ExampleSettings) {
   });
 
   await paginateTestRows(pageContainer, [
-    ...generateAlphaTest(renderer, 'sdf'),
+    // The SDF text renderer is not registered in canvas render mode
+    ...(renderMode === 'webgl' ? generateAlphaTest(renderer, 'sdf') : []),
     ...generateAlphaTest(renderer, 'canvas'),
   ]);
 

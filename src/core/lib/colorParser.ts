@@ -14,18 +14,29 @@ const WHITE: IParsedColor = {
   b: 0xff,
 };
 
+const SCRATCH: IParsedColor = {
+  isWhite: false,
+  a: 1,
+  r: 0,
+  g: 0,
+  b: 0,
+};
+
 /**
- * Extract color components
+ * Extract color components.
+ *
+ * Returns a shared scratch object to avoid a per-call allocation in the
+ * canvas frame loop — consume it synchronously, never retain it.
  */
 export function parseColor(abgr: number): IParsedColor {
   if (abgr === 0xffffffff) {
     return WHITE;
   }
-  const a = ((abgr >>> 24) & 0xff) / 255;
-  const b = (abgr >>> 16) & 0xff & 0xff;
-  const g = (abgr >>> 8) & 0xff & 0xff;
-  const r = abgr & 0xff & 0xff;
-  return { isWhite: false, a, r, g, b };
+  SCRATCH.a = ((abgr >>> 24) & 0xff) / 255;
+  SCRATCH.b = (abgr >>> 16) & 0xff;
+  SCRATCH.g = (abgr >>> 8) & 0xff;
+  SCRATCH.r = abgr & 0xff;
+  return SCRATCH;
 }
 
 export function parseToAbgrString(abgr: number): string {

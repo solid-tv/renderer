@@ -17,8 +17,16 @@ export class CanvasRenderer extends CoreRenderer {
   private canvas: HTMLCanvasElement;
   private pixelRatio: number;
   private clearColor: string;
+  private clearColorAlpha: number;
   public renderToTextureActive = false;
   activeRttNode: CoreNode | null = null;
+  // Scratch state for the preallocated shader renderContext callback below —
+  // valid only for the duration of the shader render() call in addQuad.
+  private shaderContextNode: CoreNode | null = null;
+  private shaderContextTexture: Texture | null = null;
+  private shaderRenderContext = () => {
+    this.renderContext(this.shaderContextNode!, this.shaderContextTexture!);
+  };
 
   constructor(options: CoreRendererOptions) {
     super(options);
@@ -29,16 +37,23 @@ export class CanvasRenderer extends CoreRenderer {
     this.context = canvas.getContext('2d') as CanvasRenderingContext2D;
     this.pixelRatio = this.stage.pixelRatio;
     this.clearColor = normalizeCanvasColor(this.stage.clearColor);
+    this.clearColorAlpha = (this.stage.clearColor >>> 24) & 0xff;
   }
 
   reset(): void {
-    this.canvas.width = this.canvas.width; // quick reset canvas
-
     const ctx = this.context;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
 
-    if (this.clearColor) {
+    // The frame's save/restore pairs are balanced, so resetting the transform
+    // and clearing is equivalent to the `canvas.width = canvas.width` trick
+    // without tearing down the backing store every frame.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    if (this.clearColorAlpha !== 0) {
       ctx.fillStyle = this.clearColor;
-      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.fillRect(0, 0, w, h);
     }
 
     ctx.scale(this.pixelRatio, this.pixelRatio);
@@ -72,7 +87,7 @@ export class CanvasRenderer extends CoreRenderer {
       }
     }
 
-    const hasTransform = ta !== 1;
+    const hasTransform = ta !== 1 || td !== 1 || tb !== 0 || tc !== 0;
     const clippingValid = clippingRect.valid === true;
 
     // If the clipping rect is valid but zero-area, the node is fully clipped — skip rendering
@@ -99,10 +114,9 @@ export class CanvasRenderer extends CoreRenderer {
     }
 
     if (hasClipping === true) {
-      const path = new Path2D();
-      const { x, y, w, h } = clippingRect;
-      path.rect(x, y, w, h);
-      ctx.clip(path);
+      ctx.beginPath();
+      ctx.rect(clippingRect.x, clippingRect.y, clippingRect.w, clippingRect.h);
+      ctx.clip();
     }
 
     if (hasTransform === true) {
@@ -121,12 +135,11 @@ export class CanvasRenderer extends CoreRenderer {
     }
 
     if (hasShader === true) {
-      let renderContext: (() => void) | null = () => {
-        this.renderContext(node, texture);
-      };
-
-      (shader as CanvasShaderNode).render(ctx, node, renderContext);
-      renderContext = null;
+      this.shaderContextNode = node;
+      this.shaderContextTexture = texture;
+      (shader as CanvasShaderNode).render(ctx, node, this.shaderRenderContext);
+      this.shaderContextNode = null;
+      this.shaderContextTexture = null;
     } else {
       this.renderContext(node, texture);
     }
@@ -345,6 +358,7 @@ export class CanvasRenderer extends CoreRenderer {
    */
   updateClearColor(color: number) {
     this.clearColor = normalizeCanvasColor(color);
+    this.clearColorAlpha = (color >>> 24) & 0xff;
   }
 
   override getTextureCoords(

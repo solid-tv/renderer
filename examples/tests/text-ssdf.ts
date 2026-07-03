@@ -1,5 +1,8 @@
 import type { ExampleSettings } from '../common/ExampleSettings.js';
 
+// SSDF fonts only exist for the SDF/WebGL text renderer
+export const renderModes: ('webgl' | 'canvas')[] = ['webgl'];
+
 export async function automation(settings: ExampleSettings) {
   await test(settings);
   await settings.snapshot();

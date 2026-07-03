@@ -127,6 +127,23 @@ export class WebGlRenderer extends CoreRenderer {
   sdfQuadCount = 0;
   sdfQuadBufferCollection: BufferCollection;
   curSdfRenderOp: SdfRenderOp | null = null;
+  /**
+   * Whether the shared SDF buffer's bytes may differ from what the GPU
+   * currently holds. Set by every write path that produces fresh bytes
+   * (cache-miss recompute, translated copy), by anything that can shift
+   * offsets or resize the buffer (render-list rebuild, RTT partial upload,
+   * backing-store growth), and consumed by {@link uploadSdfBuffer}. The
+   * exact cache-hit mem-copy path deliberately does NOT set it — it writes
+   * byte-identical data at identical offsets. Conservative direction: when
+   * in doubt, set it — a redundant upload is correct, a wrong skip is a
+   * glitch.
+   */
+  sdfBufferChanged = true;
+  /**
+   * Float32 length of the last main-pass SDF upload — the size half of the
+   * skip test in {@link uploadSdfBuffer}.
+   */
+  lastUploadedSdfSize = 0;
 
   /**
    * When true, the entire quad buffer is re-uploaded to the GPU via bufferData
@@ -741,6 +758,9 @@ export class WebGlRenderer extends CoreRenderer {
       return;
     }
 
+    // Full recompute writes fresh bytes — the GPU copy is now stale.
+    this.sdfBufferChanged = true;
+
     let idx = this.sdfBufferIdx;
     this.ensureSdfBufferCapacity(idx + glyphCount * 24);
 
@@ -904,6 +924,76 @@ export class WebGlRenderer extends CoreRenderer {
   }
 
   /**
+   * Append cached SDF vertices translated by (dx, dy) to the shared buffer.
+   *
+   * @remarks
+   * The scroll fast path: a text node whose transform changed by pure
+   * translation reuses its world-space vertex cache — one mem-copy plus two
+   * adds per vertex instead of full per-glyph matrix math, and the cache
+   * keeps its original base so nothing is re-snapshotted per frame.
+   *
+   * The copy MUST stay a typed-array `set` (bit-exact memcpy): packed ABGR
+   * colors live in the same Float32Array and some bit patterns are float32
+   * NaNs, which element-wise float reads/writes may canonicalize and corrupt.
+   * Only the two position floats of each vertex are touched after the copy.
+   */
+  addSdfTranslatedQuads(
+    cachedVertices: Float32Array,
+    numGlyphs: number,
+    dx: number,
+    dy: number,
+    atlasTexture: WebGlCtxTexture,
+    clippingRect: import('../../lib/utils.js').RectWithValid,
+    worldAlpha: number,
+    width: number,
+    height: number,
+    parentHasRenderTexture: boolean,
+    framebufferDimensions:
+      | import('../../../common/CommonTypes.js').Dimensions
+      | null,
+    sdfShader: WebGlShaderNode,
+  ): void {
+    if (numGlyphs === 0) {
+      return;
+    }
+
+    // Translated positions are fresh bytes — the GPU copy is now stale.
+    this.sdfBufferChanged = true;
+
+    const startQuad = this.sdfQuadCount;
+    const idx = this.sdfBufferIdx;
+
+    this.ensureSdfBufferCapacity(idx + cachedVertices.length);
+
+    // Read the buffer reference only after ensureSdfBufferCapacity — growth
+    // swaps the backing store.
+    const f = this.fSdfBuffer;
+    f.set(cachedVertices, idx);
+
+    const end = idx + cachedVertices.length;
+    for (let i = idx; i < end; i += 6) {
+      f[i] = f[i]! + dx;
+      f[i + 1] = f[i + 1]! + dy;
+    }
+
+    this.sdfBufferIdx = end;
+    this.sdfQuadCount += numGlyphs;
+
+    this.finalizeSdfBatch(
+      startQuad,
+      numGlyphs,
+      atlasTexture,
+      clippingRect,
+      worldAlpha,
+      width,
+      height,
+      parentHasRenderTexture,
+      framebufferDimensions,
+      sdfShader,
+    );
+  }
+
+  /**
    * Shared batching logic for SDF render ops.
    * Called by both `addSdfQuads` (full compute) and `addSdfCachedQuads` (fast copy).
    */
@@ -1004,6 +1094,9 @@ export class WebGlRenderer extends CoreRenderer {
     this.sdfBuffer = newBuffer;
     this.fSdfBuffer = newFSdfBuffer;
     this.uiSdfBuffer = newUiSdfBuffer;
+
+    // New backing store — never skip the next upload.
+    this.sdfBufferChanged = true;
   }
 
   /**
@@ -1080,12 +1173,7 @@ export class WebGlRenderer extends CoreRenderer {
     }
 
     // Upload the shared SDF buffer if any SDF glyphs were written this frame.
-    if (this.sdfBufferIdx > 0) {
-      const sdfBuf =
-        this.sdfQuadBufferCollection.getBuffer('a_position') || null;
-      const sdfArr = new Float32Array(this.sdfBuffer, 0, this.sdfBufferIdx);
-      glw.arrayBufferData(sdfBuf, sdfArr, glw.DYNAMIC_DRAW);
-    }
+    this.uploadSdfBuffer();
 
     for (let i = 0, length = this.renderOps.length; i < length; i++) {
       this.renderOps[i]!.draw(this);
@@ -1097,6 +1185,34 @@ export class WebGlRenderer extends CoreRenderer {
     // Calculate the size of each quad in bytes (4 vertices per quad) times the size of each vertex in bytes
     const QUAD_SIZE_IN_BYTES = 4 * (5 * BYTES_PER_ELEMENT); // 5 attributes per vertex
     this.numQuadsRendered = this.quadBufferUsage / QUAD_SIZE_IN_BYTES;
+  }
+
+  /**
+   * Upload the shared SDF buffer for the main pass, skipping the driver-side
+   * `bufferData` copy when the bytes provably match what the GPU already
+   * holds: every write this frame was an exact cache-hit mem-copy
+   * (`sdfBufferChanged` false) and the total size matches the previous
+   * upload. Exact hits write byte-identical data, and identical offsets are
+   * guaranteed because every source of reorder or resize — cache-miss
+   * recompute, translated copy, render-list rebuild, RTT partial upload,
+   * backing-store growth — sets `sdfBufferChanged`.
+   */
+  private uploadSdfBuffer(): void {
+    if (this.sdfBufferIdx === 0) {
+      return;
+    }
+    if (
+      this.sdfBufferChanged === false &&
+      this.sdfBufferIdx === this.lastUploadedSdfSize
+    ) {
+      return;
+    }
+    const glw = this.glw;
+    const sdfBuf = this.sdfQuadBufferCollection.getBuffer('a_position') || null;
+    const sdfArr = new Float32Array(this.sdfBuffer, 0, this.sdfBufferIdx);
+    glw.arrayBufferData(sdfBuf, sdfArr, glw.DYNAMIC_DRAW);
+    this.lastUploadedSdfSize = this.sdfBufferIdx;
+    this.sdfBufferChanged = false;
   }
 
   getQuadCount(): number {
@@ -1335,6 +1451,9 @@ export class WebGlRenderer extends CoreRenderer {
         this.sdfQuadBufferCollection.getBuffer('a_position') || null;
       const sdfArr = new Float32Array(this.sdfBuffer, 0, this.sdfBufferIdx);
       glw.arrayBufferData(sdfBuf, sdfArr, glw.DYNAMIC_DRAW);
+      // This partial upload replaced the GL buffer's contents and size — the
+      // main pass upload can no longer be skipped this frame.
+      this.sdfBufferChanged = true;
     }
 
     for (let i = 0, length = this.renderOps.length; i < length; i++) {
@@ -1501,6 +1620,12 @@ export class WebGlRenderer extends CoreRenderer {
    * next addQuad() pass will reassign compact, contiguous slots starting from 0.
    */
   override invalidateQuadBuffer(): void {
+    // A render-list rebuild can reorder text nodes without touching their
+    // SDF vertex caches; byte-identical glyph data would then land at
+    // different offsets, so the upload skip must not fire on the rebuild
+    // frame.
+    this.sdfBufferChanged = true;
+
     if (!DIRTY_QUAD_BUFFER) {
       return;
     }

@@ -6,7 +6,7 @@ dist
 dist-*
 examples/dist-tsc
 visual-regression/failed-results
-visual-regression/certified-snapshots/*-local
+visual-regression/certified-snapshots/*-local*
 build
 releases
 .tmp

@@ -150,11 +150,14 @@ const addQuads = (_layout?: TextLayout): Float32Array | null => {
 /**
  * Submit SDF glyphs to the renderer's shared batched buffer.
  *
- * Two paths:
- * 1. **Cache hit** — layout, transform, color, and alpha haven't changed.
- *    The cached pre-transformed Float32Array is mem-copied directly into the
- *    shared SDF buffer (no per-glyph matrix math).
- * 2. **Cache miss** — re-computes per-glyph world-space vertices via
+ * Three paths:
+ * 1. **Exact cache hit** — layout, transform, color, and alpha haven't
+ *    changed. The cached pre-transformed Float32Array is mem-copied directly
+ *    into the shared SDF buffer (no per-glyph matrix math).
+ * 2. **Translation hit** — only tx/ty changed (the scroll path). The cached
+ *    vertices are copied with the position delta applied; the cache keeps its
+ *    original base so nothing is re-snapshotted.
+ * 3. **Cache miss** — re-computes per-glyph world-space vertices via
  *    `addSdfQuads`, then snapshots the result into the cache.
  */
 const renderQuads = (
@@ -176,7 +179,7 @@ const renderQuads = (
   // Compiles on the first real SDF draw; cheap memoized lookup thereafter.
   const shader = getSdfShader(webGlRenderer.stage);
 
-  // --- Cache-hit fast path ------------------------------------------------
+  // --- Cache-hit fast paths -----------------------------------------------
   if (cache !== undefined && cache.vertices !== null) {
     const ct = cache.transform;
     const t = renderProps.globalTransform;
@@ -187,13 +190,38 @@ const renderQuads = (
       ct[0] === t[0] &&
       ct[1] === t[1] &&
       ct[2] === t[3] &&
-      ct[3] === t[4] &&
-      ct[4] === t[6] &&
-      ct[5] === t[7]
+      ct[3] === t[4]
     ) {
-      webGlRenderer.addSdfCachedQuads(
+      const dx = t[6]! - ct[4]!;
+      const dy = t[7]! - ct[5]!;
+
+      if (dx === 0 && dy === 0) {
+        // Fully static: mem-copy the cached vertices as-is.
+        webGlRenderer.addSdfCachedQuads(
+          cache.vertices,
+          cache.glyphCount,
+          ctxTexture,
+          renderProps.clippingRect,
+          renderProps.worldAlpha,
+          layout.width,
+          layout.height,
+          renderProps.parentHasRenderTexture,
+          renderProps.framebufferDimensions,
+          shader,
+        );
+        return null;
+      }
+
+      // Pure translation (the scroll path): same glyphs, same scale/rotation,
+      // only tx/ty moved. Copy the cached vertices shifted by the delta from
+      // the cached base transform. The cache keeps its original base, so
+      // every frame recomputes from the same reference — no drift and no
+      // per-frame re-snapshot.
+      webGlRenderer.addSdfTranslatedQuads(
         cache.vertices,
         cache.glyphCount,
+        dx,
+        dy,
         ctxTexture,
         renderProps.clippingRect,
         renderProps.worldAlpha,

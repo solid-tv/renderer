@@ -21,7 +21,7 @@ export async function automation(settings: ExampleSettings) {
  * @param param0
  */
 export default async function test(settings: ExampleSettings) {
-  const { renderer } = settings;
+  const { renderer, renderMode } = settings;
 
   const pageContainer = new PageContainer(settings, {
     w: renderer.settings.appWidth,
@@ -29,12 +29,20 @@ export default async function test(settings: ExampleSettings) {
     title: 'Text Offscreen Move Tests',
   });
 
-  pageContainer.pushPage(createTestCase(renderer, 'sdf', 0, 0));
-  pageContainer.pushPage(createTestCase(renderer, 'sdf', 400, 0));
-  pageContainer.pushPage(createTestCase(renderer, 'sdf', 400, 400));
-  pageContainer.pushPage(createTestCase(renderer, 'canvas', 0, 0));
-  pageContainer.pushPage(createTestCase(renderer, 'canvas', 400, 0));
-  pageContainer.pushPage(createTestCase(renderer, 'canvas', 400, 400));
+  if (renderMode === 'webgl') {
+    pageContainer.pushPage(createTestCase(renderer, renderMode, 'sdf', 0, 0));
+    pageContainer.pushPage(createTestCase(renderer, renderMode, 'sdf', 400, 0));
+    pageContainer.pushPage(
+      createTestCase(renderer, renderMode, 'sdf', 400, 400),
+    );
+  }
+  pageContainer.pushPage(createTestCase(renderer, renderMode, 'canvas', 0, 0));
+  pageContainer.pushPage(
+    createTestCase(renderer, renderMode, 'canvas', 400, 0),
+  );
+  pageContainer.pushPage(
+    createTestCase(renderer, renderMode, 'canvas', 400, 400),
+  );
 
   await delay(200);
   pageContainer.finalizePages();
@@ -51,6 +59,7 @@ const commonTextProps = {
 
 function createTestCase(
   renderer: RendererMain,
+  renderMode: ExampleSettings['renderMode'],
   textRenderer: 'canvas' | 'sdf',
   maxWidth: number,
   maxHeight: number,
@@ -61,7 +70,7 @@ function createTestCase(
       y: 10,
       text: '',
       fontFamily: 'Ubuntu',
-      textRendererOverride: 'sdf',
+      textRendererOverride: renderMode === 'webgl' ? 'sdf' : 'canvas',
       fontSize: 30,
       parent: page,
     });

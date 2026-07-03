@@ -368,6 +368,13 @@ export const wrapLine = (
 ): WrappedLinesStruct => {
   const words = line.split(spaceRegex);
   const spaces = line.match(spaceRegex) || [];
+  // Leading whitespace splits into an empty token; fold it into the next
+  // word so it isn't dropped and re-applied after the first word instead.
+  if (words[0] === '' && words.length > 1) {
+    const leadingSpace = spaces.shift() ?? '';
+    words.shift();
+    words[0] = leadingSpace + (words[0] ?? '');
+  }
   const wrappedLines: TextLineStruct[] = [];
   let currentLine = '';
   let currentLineWidth = 0;
@@ -454,8 +461,9 @@ export const wrapLine = (
       continue;
     }
     const space = spaces[spaceIdx++] || '';
-    // For width calculation, treat ZWSP as having 0 width but regular space functionality
-    const effectiveSpaceWidth = space === '\u200B' ? 0 : spaceWidth;
+    // Measure the real separator \u2014 multi-space runs collapse into one match.
+    const effectiveSpaceWidth =
+      space.length > 0 ? measureText(space, fontFamily, letterSpacing) : 0;
     const totalWidth = currentLineWidth + effectiveSpaceWidth + wordWidth;
 
     if (totalWidth < maxWidth) {

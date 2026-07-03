@@ -465,10 +465,14 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
 
 1. Add test file in `examples/tests/` (e.g., `shader-my-feature.ts`)
 2. Export `automation` function that calls `settings.snapshot()`
-3. Run `pnpm test:visual --capture` to generate snapshot
+3. Run `pnpm test:visual --capture` to generate snapshots — both backends
+   (WebGL and Canvas2D) are captured by default. If the feature is
+   WebGL-only, export `renderModes: ('webgl' | 'canvas')[] = ['webgl']`
+   from the test module with a comment stating why
 4. Manually verify output in `visual-regression/certified-snapshots/`
-5. Commit certified snapshot with your code
-6. CI will fail if future changes break rendering
+   (both the `chromium-*` and `chromium-*-canvas` directories)
+5. Commit certified snapshots with your code
+6. CI will fail if future changes break rendering on either backend
 
 ## What to NEVER Do
 

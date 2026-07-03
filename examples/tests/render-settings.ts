@@ -22,14 +22,21 @@ export async function automation(settings: ExampleSettings) {
   await testPage();
 }
 
-export default async function test({ renderer, testRoot }: ExampleSettings) {
+export default async function test({
+  renderer,
+  testRoot,
+  renderMode,
+}: ExampleSettings) {
+  // Ubuntu-ssdf only exists as an SDF font; fall back to the canvas-loaded
+  // Ubuntu face so the labels render under the Canvas2D backend.
+  const fontFamily = renderMode === 'canvas' ? 'Ubuntu' : 'Ubuntu-ssdf';
   const ppr = renderer.stage.options.devicePhysicalPixelRatio;
   const lpr = renderer.stage.options.deviceLogicalPixelRatio;
 
   const info = renderer.createTextNode({
     text: 'Initial default settings',
     fontSize: 30,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     x: 10,
     y: 810,
     maxWidth: renderer.root.w - 20,
@@ -41,7 +48,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 10,
     y: 960,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
 
@@ -82,7 +89,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     pivot: 0,
     text: 'red',
     fontSize: 80,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: boundaryRect2,
   });
 
@@ -92,7 +99,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 10,
     y: yPos,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
   yPos += 40;
@@ -102,7 +109,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 10,
     y: yPos,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
   yPos += 40;
@@ -112,7 +119,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 10,
     y: yPos,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
   yPos += 40;
@@ -122,7 +129,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 10,
     y: yPos,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
   yPos += 40;
@@ -132,7 +139,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 10,
     y: yPos,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
   yPos += 40;
@@ -151,7 +158,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 50,
     y: yPos,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
   yPos += 40;
@@ -170,7 +177,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     y: yPos,
     h: 100,
     text: 'Inspector enabled?',
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     fontSize: 30,
     parent: testRoot,
     data: {
@@ -184,7 +191,7 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     fontSize: 30,
     x: 10,
     y: yPos + 100,
-    fontFamily: 'Ubuntu-ssdf',
+    fontFamily: fontFamily,
     parent: testRoot,
   });
   yPos += 40;

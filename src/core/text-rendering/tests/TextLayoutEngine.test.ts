@@ -248,6 +248,28 @@ describe('SDF Text Utils', () => {
       expect(result[0][0]?.[2]).toBe(true);
       expect(result[1]).toBe(0);
     });
+
+    it('should keep leading whitespace attached to the first word, not the word after it', () => {
+      // Regression test: a line starting with padding spaces (used e.g. to
+      // reserve room for an inline badge before the first word) used to have
+      // those spaces silently reassigned as the gap AFTER the first word.
+      const result = wrapLine(
+        testMeasureText,
+        '   hello world',
+        'Arial',
+        1000,
+        0,
+        10, // spaceWidth
+        '',
+        0,
+        'break-word',
+        10,
+      );
+
+      const [lines] = result;
+      expect(lines).toHaveLength(1);
+      expect(lines[0]?.[0]).toBe('   hello world');
+    });
   });
 
   describe('wrapText', () => {
