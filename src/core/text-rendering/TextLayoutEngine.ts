@@ -461,9 +461,14 @@ export const wrapLine = (
       continue;
     }
     const space = spaces[spaceIdx++] || '';
-    // Measure the real separator \u2014 multi-space runs collapse into one match.
+    // Single ' ' is the dominant separator \u2014 reuse the precomputed width.
+    // Multi-space/ZWSP runs collapse into one match; measure those for real.
     const effectiveSpaceWidth =
-      space.length > 0 ? measureText(space, fontFamily, letterSpacing) : 0;
+      space === ' '
+        ? spaceWidth
+        : space.length > 0
+        ? measureText(space, fontFamily, letterSpacing)
+        : 0;
     const totalWidth = currentLineWidth + effectiveSpaceWidth + wordWidth;
 
     if (totalWidth < maxWidth) {
