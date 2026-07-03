@@ -454,8 +454,9 @@ export const wrapLine = (
       continue;
     }
     const space = spaces[spaceIdx++] || '';
-    // For width calculation, treat ZWSP as having 0 width but regular space functionality
-    const effectiveSpaceWidth = space === '\u200B' ? 0 : spaceWidth;
+    // Measure the real separator \u2014 multi-space runs collapse into one match.
+    const effectiveSpaceWidth =
+      space.length > 0 ? measureText(space, fontFamily, letterSpacing) : 0;
     const totalWidth = currentLineWidth + effectiveSpaceWidth + wordWidth;
 
     if (totalWidth < maxWidth) {
