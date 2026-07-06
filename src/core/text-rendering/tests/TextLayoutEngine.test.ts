@@ -270,6 +270,83 @@ describe('SDF Text Utils', () => {
       expect(lines).toHaveLength(1);
       expect(lines[0]?.[0]).toBe('   hello world');
     });
+
+    it('should count the full width of a multi-space separator when wrapping', () => {
+      // 'aa  bb' really measures 60 (6 chars * 10). Counting the separator
+      // as a single spaceWidth (50) used to keep it on one line past maxWidth.
+      const result = wrapLine(
+        testMeasureText,
+        'aa  bb',
+        'Arial',
+        55, // maxWidth — below the real 60, above the buggy 50
+        0,
+        10, // spaceWidth
+        '',
+        0,
+        'break-word',
+        10,
+      );
+
+      const [lines] = result;
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toEqual(['aa', 20, false, 0, 0]);
+      expect(lines[1]).toEqual(['bb', 20, false, 0, 0]);
+    });
+
+    it('should preserve a multi-space separator and its width when the line fits', () => {
+      const result = wrapLine(
+        testMeasureText,
+        'aa  bb',
+        'Arial',
+        1000,
+        0,
+        10, // spaceWidth
+        '',
+        0,
+        'break-word',
+        10,
+      );
+
+      expect(result[0][0]).toEqual(['aa  bb', 60, false, 0, 0]);
+    });
+
+    it('should treat a run of multiple ZWSPs as a zero-width separator', () => {
+      const result = wrapLine(
+        testMeasureText,
+        'aa\u200B\u200Bbb',
+        'Arial',
+        1000,
+        0,
+        10, // spaceWidth
+        '',
+        0,
+        'break-word',
+        10,
+      );
+
+      // Zero-width separator: no visible gap added, width is just the glyphs
+      expect(result[0][0]).toEqual(['aabb', 40, false, 0, 0]);
+    });
+
+    it('should use the precomputed spaceWidth for a single-space separator', () => {
+      // spaceWidth (4) deliberately differs from testMeasureText(' ') (10):
+      // the single-space fast path must reuse the precomputed value instead
+      // of re-measuring the separator.
+      const result = wrapLine(
+        testMeasureText,
+        'aa bb',
+        'Arial',
+        1000,
+        0,
+        4, // spaceWidth
+        '',
+        0,
+        'break-word',
+        10,
+      );
+
+      expect(result[0][0]).toEqual(['aa bb', 44, false, 0, 0]);
+    });
   });
 
   describe('wrapText', () => {
