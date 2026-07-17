@@ -466,6 +466,14 @@ export class CoreTextureManager extends EventEmitter {
     // many image nodes renderable in one tick) can't serialize dozens of
     // decodes and starve the render loop. With workers, the pool already caps
     // concurrency, so the gate stays null (no main-thread ceiling needed).
+    //
+    // Scope: this bounds the `createImageBitmap` decode, which happens inside
+    // `getTextureData` (see `loadTexture`). On the `<img>` fallback path
+    // (`hasCreateImageBitmap === false`) the image decodes lazily and the real
+    // main-thread cost is the synchronous `texImage2D` at upload, which the
+    // gate does not cover — the per-frame upload budget (`processUntil`) paces
+    // that instead. The gate is therefore most effective on the
+    // createImageBitmap(-polyfill) path.
     if (this.imageWorkerManager === null && this.imageDecodeConcurrency > 0) {
       this.decodeGate = new ConcurrencyGate(this.imageDecodeConcurrency);
     }
