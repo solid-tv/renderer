@@ -630,13 +630,17 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    * - Full - Supports createImageBitmap(image, sx, sy, sw, sh, options)
    *
    * Note with auto detection, the renderer will attempt to use the most advanced
-   * version of the API available. If the API is not available, the renderer will
-   * fall back to the next available version.
+   * version of the API available. If the API is not available (e.g. Chrome < 50,
+   * including the Chrome 38 support floor), the renderer falls back to loading
+   * images via `new Image()`.
    *
-   * This will affect startup performance as the renderer will need to determine
-   * the supported version of the API.
+   * `'auto'` runs a small startup probe (a 1x1 PNG) to determine support; this
+   * adds a negligible one-time startup cost. Set an explicit value (`'full'`,
+   * `'options'`, `'basic'`) to skip the probe ONLY when the target runtime is
+   * known to support that level — forcing a level the runtime lacks will fail
+   * to load images. When in doubt, use `'auto'`.
    *
-   * @defaultValue `full`
+   * @defaultValue `auto`
    */
   createImageBitmapSupport: 'auto' | 'basic' | 'options' | 'full';
 
@@ -816,7 +820,7 @@ export class RendererMain extends EventEmitter {
       textBaselineMode: settings.textBaselineMode ?? 'optical',
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
-      createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
+      createImageBitmapSupport: settings.createImageBitmapSupport || 'auto',
       // undefined -> true (assume honored, no probe); 'auto' -> probe;
       // explicit boolean -> force the value.
       premultiplyAlphaHonored:
