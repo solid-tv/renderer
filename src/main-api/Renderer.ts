@@ -482,6 +482,26 @@ export type RendererMainSettings = RendererRuntimeSettings & {
   numImageWorkers: number;
 
   /**
+   * Maximum number of image fetch+decode operations allowed to run at once
+   * when image workers are unavailable
+   *
+   * @remarks
+   * Only applies when there is no image worker manager (i.e.
+   * `numImageWorkers === 0`, or workers/`createImageBitmap` are unsupported).
+   * In that mode every image decode runs on the main thread, so a burst — such
+   * as a scroll that makes many image nodes renderable in a single tick — can
+   * fire dozens of decodes back-to-back and starve the render loop. This caps
+   * how many run concurrently; on-screen (priority) textures bypass the cap so
+   * they never wait behind off-screen prefetch.
+   *
+   * Has no effect when image workers are active — the worker pool already
+   * bounds concurrency by its size. Set to `0` to disable the cap (unbounded).
+   *
+   * @defaultValue `4`
+   */
+  imageDecodeConcurrency: number;
+
+  /**
    * Renderer Engine
    *
    * @remarks
@@ -781,6 +801,10 @@ export class RendererMain extends EventEmitter {
       textLayoutCacheSize: settings.textLayoutCacheSize ?? 250,
       numImageWorkers:
         settings.numImageWorkers !== undefined ? settings.numImageWorkers : 2,
+      imageDecodeConcurrency:
+        settings.imageDecodeConcurrency !== undefined
+          ? settings.imageDecodeConcurrency
+          : 4,
       enableContextSpy: settings.enableContextSpy ?? false,
       forceWebGL2: settings.forceWebGL2 ?? false,
       disableVertexArrayObject: settings.disableVertexArrayObject ?? false,
@@ -854,6 +878,7 @@ export class RendererMain extends EventEmitter {
       fpsUpdateInterval: settings.fpsUpdateInterval!,
       enableClear: settings.enableClear!,
       numImageWorkers: settings.numImageWorkers!,
+      imageDecodeConcurrency: settings.imageDecodeConcurrency!,
       renderEngine: settings.renderEngine!,
       textureMemory: resolvedTxSettings,
       eventBus: this,

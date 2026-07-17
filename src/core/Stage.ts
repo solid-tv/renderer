@@ -200,6 +200,7 @@ export class Stage {
       premultiplyAlphaHonored,
       platform,
       maxRetryCount,
+      imageDecodeConcurrency,
     } = options;
 
     assertTruthy(
@@ -229,6 +230,7 @@ export class Stage {
       // undefined -> true (default: assume honored, no probe)
       premultiplyAlphaHonored: premultiplyAlphaHonored ?? true,
       maxRetryCount,
+      imageDecodeConcurrency,
     });
 
     // Wait for the Texture Manager to initialize
