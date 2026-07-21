@@ -67,13 +67,20 @@ export class CanvasRenderer extends CoreRenderer {
     const ctx = this.context;
     const { tx, ty, ta, tb, tc, td } = node.globalTransform!;
     const clippingRect = node.clippingRect;
-    // While a placeholder is showing, render the color-rect path (the default
-    // ColorTexture) tinted by the node's premultiplied placeholder color.
-    let texture = (
-      node.placeholderActive === true
-        ? this.stage.defaultTexture
-        : node.props.texture || this.stage.defaultTexture
-    ) as Texture;
+    // While a placeholder is showing, render the node's loaded placeholder
+    // image, or the color-rect path (the default ColorTexture) tinted by the
+    // node's premultiplied placeholder color.
+    let texture;
+    if (node.fallbackActive === true) {
+      texture = node.fallbackTexture as Texture;
+    } else if (node.placeholderActive === true) {
+      texture =
+        node.placeholderTextureLoaded === true
+          ? (node.placeholderTexture as Texture)
+          : (this.stage.defaultTexture as Texture);
+    } else {
+      texture = (node.props.texture || this.stage.defaultTexture) as Texture;
+    }
     // The Canvas2D renderer only supports image textures, no textures are used for color blocks
     if (texture !== null) {
       const textureType = texture.type;
@@ -188,7 +195,10 @@ export class CanvasRenderer extends CoreRenderer {
 
       this.context.globalAlpha = tintColor.a ?? node.worldAlpha;
 
-      const txCoords = node.textureCoords;
+      // node.textureCoords belongs to the main texture (resizeMode, flips) —
+      // a placeholder image must be drawn whole.
+      const txCoords =
+        node.placeholderActive === true ? undefined : node.textureCoords;
       if (txCoords) {
         const ix = imageWidth;
         const iy = imageHeight;

@@ -13,7 +13,6 @@ import { premultiplyColorABGR } from '../utils.js';
 describe('set color()', () => {
   const defaultProps = (overrides?: Partial<CoreNodeProps>): CoreNodeProps => ({
     alpha: 0,
-    ignoreParentAlpha: false,
     autosize: false,
     boundsMargin: null,
     clipping: false,
@@ -27,6 +26,8 @@ describe('set color()', () => {
     colorTop: 0,
     colorTr: 0,
     placeholderColor: 0,
+    placeholderImage: null,
+    fallbackImage: null,
     h: 0,
     mount: 0,
     mountX: 0,
@@ -262,112 +263,6 @@ describe('set color()', () => {
       node.update(2, clippingRect);
       expect(node.isRenderable).toBe(false);
       expect(eventCallback).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('ignoreParentAlpha', () => {
-    const makeParent = (worldAlpha: number) => {
-      const parent = new CoreNode(stage, defaultProps());
-      parent.globalTransform = Matrix3d.identity();
-      parent.worldAlpha = worldAlpha;
-      return parent;
-    };
-
-    it('multiplies parent world alpha by default', () => {
-      const parent = makeParent(0.5);
-      const node = new CoreNode(stage, defaultProps({ parent, alpha: 0.8 }));
-
-      node.update(0, clippingRect);
-
-      expect(node.worldAlpha).toBeCloseTo(0.4);
-    });
-
-    it('uses own alpha only when enabled', () => {
-      const parent = makeParent(0.5);
-      const node = new CoreNode(
-        stage,
-        defaultProps({ parent, alpha: 0.8, ignoreParentAlpha: true }),
-      );
-
-      node.update(0, clippingRect);
-
-      expect(node.worldAlpha).toBe(0.8);
-    });
-
-    it('keeps its own world alpha while the parent fades toward 0', () => {
-      const parent = makeParent(0.01);
-      const node = new CoreNode(
-        stage,
-        defaultProps({ parent, alpha: 1, ignoreParentAlpha: true }),
-      );
-      node.w = 100;
-      node.h = 100;
-      node.color = 0xffffffff;
-
-      node.update(0, clippingRect);
-
-      expect(node.worldAlpha).toBe(1);
-      expect(node.isRenderable).toBe(true);
-    });
-
-    it('premultiplies colors with the node own alpha when enabled', () => {
-      const parent = makeParent(0.25);
-      const node = new CoreNode(
-        stage,
-        defaultProps({ parent, alpha: 0.8, ignoreParentAlpha: true }),
-      );
-      node.w = 100;
-      node.h = 100;
-      node.color = 0xff0000ff;
-
-      node.update(0, clippingRect);
-
-      expect(node.premultipliedColorTl).toBe(
-        premultiplyColorABGR(0xff0000ff, 0.8),
-      );
-    });
-
-    it('toggling the setter recomputes world alpha', () => {
-      const parent = makeParent(0.5);
-      const node = new CoreNode(stage, defaultProps({ parent, alpha: 0.8 }));
-
-      node.update(0, clippingRect);
-      expect(node.worldAlpha).toBeCloseTo(0.4);
-
-      node.ignoreParentAlpha = true;
-      node.update(1, clippingRect);
-      expect(node.worldAlpha).toBe(0.8);
-
-      node.ignoreParentAlpha = false;
-      node.update(2, clippingRect);
-      expect(node.worldAlpha).toBeCloseTo(0.4);
-    });
-
-    it('setting the same value does not flag an update', () => {
-      const node = new CoreNode(stage, defaultProps());
-      const updateTypeBefore = node.updateType;
-
-      node.ignoreParentAlpha = false;
-
-      expect(node.updateType).toBe(updateTypeBefore);
-    });
-
-    it('descendants inherit the node world alpha as usual', () => {
-      const parent = makeParent(0.5);
-      const node = new CoreNode(
-        stage,
-        defaultProps({ parent, alpha: 0.8, ignoreParentAlpha: true }),
-      );
-      const child = new CoreNode(
-        stage,
-        defaultProps({ parent: node, alpha: 0.5 }),
-      );
-
-      node.update(0, clippingRect);
-      child.update(0, clippingRect);
-
-      expect(node.worldAlpha).toBe(0.8);
-      expect(child.worldAlpha).toBeCloseTo(0.4);
     });
   });
 
@@ -1571,153 +1466,30 @@ describe('set color()', () => {
     });
   });
 
-  describe('renderOnlyInViewport', () => {
-    // Viewport is 0..200; the preload (bounds-margin) ring extends to 400.
-    // A node at x=250 is InBounds (margin ring); at x=50 it is InViewport;
-    // at x=500 it is OutOfBounds.
-    function boundsStage(renderOnlyInViewport: boolean): Stage {
-      return mock<Stage>({
+  describe('placeholderImage', () => {
+    // The placeholderImage setter resolves URLs through txManager, so this
+    // suite uses a stage mock with an explicit txManager stub.
+    function placeholderStage() {
+      const createTexture = vi.fn();
+      const loadTexture = vi.fn();
+      const stage = mock<Stage>({
         strictBound: createBound(0, 0, 200, 200),
-        preloadBound: createBound(0, 0, 400, 200),
+        preloadBound: createBound(0, 0, 200, 200),
         defaultTexture: {
           state: 'loaded',
         },
         renderer: mock<CoreRenderer>() as CoreRenderer,
-        renderOnlyInViewport,
+        txManager: {
+          createTexture,
+          loadTexture,
+        } as unknown as Stage['txManager'],
       });
+      return { stage, createTexture, loadTexture };
     }
 
-    function loadedTextureNode(stage: Stage, x: number): CoreNode {
-      const parent = new CoreNode(stage, defaultProps());
-      parent.globalTransform = Matrix3d.identity();
-      parent.worldAlpha = 1;
-
-      const node = new CoreNode(stage, defaultProps({ parent }));
-      node.alpha = 1;
-      node.x = x;
-      node.y = 0;
-      node.w = 100;
-      node.h = 100;
-      node.texture = mock<ImageTexture>({
-        state: 'loaded',
-        setRenderableOwner: vi.fn(),
-      });
-      node.textureLoaded = true;
-      return node;
-    }
-
-    it('off: a margin-ring node is renderable (legacy behavior)', () => {
-      const node = loadedTextureNode(boundsStage(false), 250);
-
-      node.update(0, clippingRect);
-
-      expect(node.isRenderable).toBe(true);
-    });
-
-    it('on: a margin-ring node is not renderable but still owns its texture', () => {
-      const node = loadedTextureNode(boundsStage(true), 250);
-
-      node.update(0, clippingRect);
-
-      expect(node.isRenderable).toBe(false);
-      // Ownership is the load trigger and cleanup protection — it must stay.
-      expect(node.texture!.setRenderableOwner).toHaveBeenCalledWith(
-        expect.anything(),
-        true,
-      );
-    });
-
-    it('on: a viewport node is renderable', () => {
-      const node = loadedTextureNode(boundsStage(true), 50);
-
-      node.update(0, clippingRect);
-
-      expect(node.isRenderable).toBe(true);
-    });
-
-    it('on: a node becomes renderable when it crosses into the viewport', () => {
-      const node = loadedTextureNode(boundsStage(true), 250);
-      node.update(0, clippingRect);
-      expect(node.isRenderable).toBe(false);
-
-      // Scroll it in.
-      node.x = 50;
-      node.update(1, clippingRect);
-      expect(node.isRenderable).toBe(true);
-
-      // And back out into the ring.
-      node.x = 250;
-      node.update(2, clippingRect);
-      expect(node.isRenderable).toBe(false);
-    });
-
-    it('on: an out-of-bounds node releases texture ownership', () => {
-      const node = loadedTextureNode(boundsStage(true), 500);
-
-      node.update(0, clippingRect);
-
-      expect(node.isRenderable).toBe(false);
-      expect(node.texture!.setRenderableOwner).not.toHaveBeenCalledWith(
-        expect.anything(),
-        true,
-      );
-    });
-
-    it('on: a margin-ring placeholder is gated the same way', () => {
-      const stage = boundsStage(true);
-      const parent = new CoreNode(stage, defaultProps());
-      parent.globalTransform = Matrix3d.identity();
-      parent.worldAlpha = 1;
-
-      const node = new CoreNode(stage, defaultProps({ parent }));
-      node.alpha = 1;
-      node.x = 250;
-      node.y = 0;
-      node.w = 100;
-      node.h = 100;
-      node.placeholderColor = 0x336699ff;
-      node.texture = mock<ImageTexture>({
-        state: 'initial',
-        setRenderableOwner: vi.fn(),
-      });
-
-      node.update(0, clippingRect);
-      expect(node.placeholderActive).toBe(true);
-      expect(node.isRenderable).toBe(false);
-
-      node.x = 50;
-      node.update(1, clippingRect);
-      expect(node.isRenderable).toBe(true);
-    });
-
-    it('on: color-only nodes in the margin ring are gated too', () => {
-      const stage = boundsStage(true);
-      const parent = new CoreNode(stage, defaultProps());
-      parent.globalTransform = Matrix3d.identity();
-      parent.worldAlpha = 1;
-
-      const node = new CoreNode(stage, defaultProps({ parent }));
-      node.alpha = 1;
-      node.x = 250;
-      node.y = 0;
-      node.w = 100;
-      node.h = 100;
-      node.color = 0xff0000ff;
-
-      node.update(0, clippingRect);
-      expect(node.isRenderable).toBe(false);
-
-      node.x = 50;
-      node.update(1, clippingRect);
-      expect(node.isRenderable).toBe(true);
-    });
-  });
-
-  describe('texture ownership cache', () => {
-    // Same shape as the placeholderColor texture fake: a real EventEmitter so
-    // loadTextureTask subscribes and we can drive freed/loaded by emitting.
     function emittingTexture(state: string): ImageTexture & {
       emit: (event: string, data?: unknown) => void;
+      preventCleanup: boolean;
     } {
       return Object.assign(new EventEmitter(), {
         state,
@@ -1728,10 +1500,11 @@ describe('set color()', () => {
         setRenderableOwner: vi.fn(),
       }) as unknown as ImageTexture & {
         emit: (event: string, data?: unknown) => void;
+        preventCleanup: boolean;
       };
     }
 
-    function visibleNode(): CoreNode {
+    function visibleNode(stage: Stage): CoreNode {
       const parent = new CoreNode(stage, defaultProps());
       parent.globalTransform = Matrix3d.identity();
       parent.worldAlpha = 1;
@@ -1745,136 +1518,287 @@ describe('set color()', () => {
       return node;
     }
 
-    const flushMicrotasks = () => Promise.resolve();
+    it('pins and eagerly loads the placeholder image on assignment', () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
 
-    it('repeated updates with unchanged state call setRenderableOwner once', () => {
-      const node = visibleNode();
-      const texture = emittingTexture('loaded');
-      node.texture = texture;
-      node.textureLoaded = true;
+      node.placeholderImage = 'placeholder-poster.png';
 
-      // The texture setter registers ownership with the node's current
-      // isRenderable (false here), so the cache starts false.
-      expect(texture.setRenderableOwner).toHaveBeenCalledTimes(1);
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        false,
-      );
-
-      node.update(0, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenCalledTimes(2);
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        true,
-      );
-
-      // Steady-state scroll: ownership unchanged, no further calls.
-      node.update(1, clippingRect);
-      node.update(2, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenCalledTimes(2);
+      expect(createTexture).toHaveBeenCalledWith('ImageTexture', {
+        src: 'placeholder-poster.png',
+      });
+      expect(placeholder.preventCleanup).toBe(true);
+      expect(loadTexture).toHaveBeenCalledWith(placeholder, true);
+      expect(node.placeholderTextureLoaded).toBe(false);
     });
 
-    it('moving out of bounds releases ownership once, returning re-adds', () => {
-      const node = visibleNode();
-      const texture = emittingTexture('loaded');
-      node.texture = texture;
-      node.textureLoaded = true;
+    it('uses an already-loaded shared placeholder immediately, untinted', () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
 
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
       node.update(0, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        true,
-      );
-      const callsAfterFirstUpdate = (
-        texture.setRenderableOwner as ReturnType<typeof vi.fn>
-      ).mock.calls.length;
 
-      // Out of the 200x200 stage bounds entirely.
-      node.x = 1000;
-      node.update(1, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenCalledTimes(
-        callsAfterFirstUpdate + 1,
-      );
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        false,
-      );
-
-      // Still out of bounds: no repeated release.
-      node.update(2, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenCalledTimes(
-        callsAfterFirstUpdate + 1,
-      );
-
-      // Back in view: re-registered exactly once.
-      node.x = 0;
-      node.update(3, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenCalledTimes(
-        callsAfterFirstUpdate + 2,
-      );
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        true,
+      expect(loadTexture).not.toHaveBeenCalled();
+      expect(node.placeholderActive).toBe(true);
+      expect(node.isRenderable).toBe(true);
+      expect(node.renderTexture).toBe(placeholder);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0xffffffff, 1),
       );
     });
 
-    it('swapping textures releases the old owner and registers the new one', () => {
-      const node = visibleNode();
-      const textureA = emittingTexture('loaded');
-      node.texture = textureA;
-      node.textureLoaded = true;
+    it('falls back to the placeholderColor rect until the image loads', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+      node.placeholderColor = 0x336699ff;
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
       node.update(0, clippingRect);
-      expect(textureA.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        true,
+
+      expect(node.renderTexture).toBe(stage.defaultTexture);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0x336699ff, 1),
       );
 
-      const textureB = emittingTexture('loaded');
-      node.texture = textureB;
+      (placeholder as { state: string }).state = 'loaded';
+      placeholder.emit('loaded', { w: 100, h: 100 });
+      node.update(1, clippingRect);
 
-      // A is released via unloadTexture.
-      expect(textureA.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        false,
-      );
-      // B is registered with the node's current renderable state (true),
-      // proving the cache reset on swap — a stale cache would skip this.
-      expect(textureB.setRenderableOwner).toHaveBeenCalledWith(
-        expect.anything(),
-        true,
+      expect(node.renderTexture).toBe(placeholder);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0xffffffff, 1),
       );
     });
 
-    it('freed texture is re-registered on the next update (reload trigger)', async () => {
-      const node = visibleNode();
-      const texture = emittingTexture('initial');
-      node.texture = texture;
+    it('renders nothing until an image-only placeholder loads', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+      expect(node.isRenderable).toBe(false);
+
+      (placeholder as { state: string }).state = 'loaded';
+      placeholder.emit('loaded', { w: 100, h: 100 });
+      node.update(1, clippingRect);
+
+      expect(node.isRenderable).toBe(true);
+      expect(node.renderTexture).toBe(placeholder);
+    });
+
+    it('the loaded main texture wins over the placeholder', async () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+      node.color = 0xffffffff;
+
+      node.placeholderImage = 'placeholder-poster.png';
+      const main = emittingTexture('initial');
+      node.texture = main;
+      node.update(0, clippingRect);
+      expect(node.renderTexture).toBe(placeholder);
+
+      await Promise.resolve(); // flush loadTextureTask so listeners attach
+      (main as { state: string }).state = 'loaded';
+      main.emit('loaded', { w: 100, h: 100 });
+      node.update(1, clippingRect);
+
+      expect(node.placeholderActive).toBe(false);
+      expect(node.renderTexture).toBe(main);
+    });
+
+    it('shows the placeholder image again while a freed main texture reloads', async () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      const main = emittingTexture('initial');
+      node.texture = main;
       node.update(0, clippingRect);
 
-      await flushMicrotasks();
-      (texture as { state: string }).state = 'loaded';
-      texture.emit('loaded', { w: 100, h: 100 });
+      await Promise.resolve();
+      (main as { state: string }).state = 'loaded';
+      main.emit('loaded', { w: 100, h: 100 });
       node.update(1, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        true,
-      );
+      expect(node.placeholderActive).toBe(false);
 
-      // Memory manager frees the texture: the node must drop ownership...
-      (texture as { state: string }).state = 'freed';
-      texture.emit('freed');
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        false,
-      );
-
-      // ...and the next update pass re-adds it, which is what triggers
-      // Texture.load() for the reload. A stale cache would skip this call.
+      (main as { state: string }).state = 'freed';
+      main.emit('freed');
       node.update(2, clippingRect);
-      expect(texture.setRenderableOwner).toHaveBeenLastCalledWith(
-        expect.anything(),
-        true,
+
+      expect(node.placeholderActive).toBe(true);
+      expect(node.renderTexture).toBe(placeholder);
+    });
+
+    it('a failed placeholder image falls back to the color rect', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+      node.placeholderColor = 0x336699ff;
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+
+      (placeholder as { state: string }).state = 'failed';
+      placeholder.emit('failed', new Error('404'));
+      node.update(1, clippingRect);
+
+      expect(node.placeholderTextureLoaded).toBe(false);
+      expect(node.isRenderable).toBe(true);
+      expect(node.renderTexture).toBe(stage.defaultTexture);
+      expect(node.premultipliedColorTl).toBe(
+        premultiplyColorABGR(0x336699ff, 1),
       );
+    });
+
+    it('self-heals an out-of-band freed placeholder: re-pins and reloads', () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      expect(node.placeholderTextureLoaded).toBe(true);
+
+      // e.g. context loss, or another node's textureOptions unpinned it
+      placeholder.preventCleanup = false;
+      (placeholder as { state: string }).state = 'freed';
+      placeholder.emit('freed');
+
+      expect(node.placeholderTextureLoaded).toBe(false);
+      expect(placeholder.preventCleanup).toBe(true);
+      expect(loadTexture).toHaveBeenCalledWith(placeholder, true);
+    });
+
+    it('destroy detaches the node from the shared placeholder texture', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      expect(placeholder.hasListeners()).toBe(true);
+
+      node.destroy();
+
+      expect(placeholder.hasListeners()).toBe(false);
+    });
+
+    it('swapping placeholderImage moves listeners to the new texture', () => {
+      const { stage, createTexture } = placeholderStage();
+      const first = emittingTexture('initial');
+      const second = emittingTexture('initial');
+      createTexture.mockReturnValueOnce(first).mockReturnValueOnce(second);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-a.png';
+      expect(first.hasListeners()).toBe(true);
+
+      node.placeholderImage = 'placeholder-b.png';
+
+      expect(first.hasListeners()).toBe(false);
+      expect(second.hasListeners()).toBe(true);
+      expect(node.placeholderTexture).toBe(second);
+    });
+
+    it('clearing placeholderImage detaches and deactivates', () => {
+      const { stage, createTexture } = placeholderStage();
+      const placeholder = emittingTexture('loaded');
+      createTexture.mockReturnValue(placeholder);
+      const node = visibleNode(stage);
+
+      node.placeholderImage = 'placeholder-poster.png';
+      node.texture = emittingTexture('initial');
+      node.update(0, clippingRect);
+      expect(node.placeholderActive).toBe(true);
+
+      node.placeholderImage = null;
+      node.update(1, clippingRect);
+
+      expect(placeholder.hasListeners()).toBe(false);
+      expect(node.placeholderActive).toBe(false);
+      expect(node.isRenderable).toBe(false);
+    });
+
+    it('many nodes share one placeholder texture and transition independently', async () => {
+      const { stage, createTexture, loadTexture } = placeholderStage();
+      const placeholder = emittingTexture('initial');
+      createTexture.mockReturnValue(placeholder);
+      // Mimic the real loadTexture: setState('loading') happens synchronously
+      // before the first await, which is what dedupes subsequent callers.
+      loadTexture.mockImplementation(() => {
+        (placeholder as { state: string }).state = 'loading';
+      });
+
+      const a = visibleNode(stage);
+      const b = visibleNode(stage);
+      const c = visibleNode(stage);
+      a.placeholderImage = 'placeholder-poster.png';
+      b.placeholderImage = 'placeholder-poster.png';
+      c.placeholderImage = 'placeholder-poster.png';
+
+      // One shared instance, one fetch.
+      expect(a.placeholderTexture).toBe(placeholder);
+      expect(b.placeholderTexture).toBe(placeholder);
+      expect(c.placeholderTexture).toBe(placeholder);
+      expect(loadTexture).toHaveBeenCalledTimes(1);
+
+      const mainA = emittingTexture('initial');
+      const mainB = emittingTexture('initial');
+      const mainC = emittingTexture('initial');
+      a.texture = mainA;
+      b.texture = mainB;
+      c.texture = mainC;
+
+      // The shared placeholder loads: every node is notified and shows it.
+      (placeholder as { state: string }).state = 'loaded';
+      placeholder.emit('loaded', { w: 100, h: 100 });
+      a.update(0, clippingRect);
+      b.update(0, clippingRect);
+      c.update(0, clippingRect);
+      expect(a.renderTexture).toBe(placeholder);
+      expect(b.renderTexture).toBe(placeholder);
+      expect(c.renderTexture).toBe(placeholder);
+
+      // Node A's poster arrives — A switches, B and C keep the placeholder.
+      await Promise.resolve(); // flush loadTextureTask so main listeners attach
+      (mainA as { state: string }).state = 'loaded';
+      mainA.emit('loaded', { w: 100, h: 100 });
+      a.update(1, clippingRect);
+      b.update(1, clippingRect);
+      expect(a.placeholderActive).toBe(false);
+      expect(a.renderTexture).toBe(mainA);
+      expect(b.renderTexture).toBe(placeholder);
+      expect(c.renderTexture).toBe(placeholder);
+
+      // Node B is destroyed mid-load — C is unaffected and the texture only
+      // loses B's listeners.
+      b.destroy();
+      expect(placeholder.hasListeners()).toBe(true);
+      expect(c.renderTexture).toBe(placeholder);
+
+      // C's poster arrives last.
+      (mainC as { state: string }).state = 'loaded';
+      mainC.emit('loaded', { w: 100, h: 100 });
+      c.update(2, clippingRect);
+      expect(c.renderTexture).toBe(mainC);
     });
   });
 });

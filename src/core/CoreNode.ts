@@ -46,7 +46,7 @@ import type { IAnimationController } from '../common/IAnimationController.js';
 import { createAnimation } from './animations/CoreAnimation.js';
 import type { CoreShaderNode } from './renderers/CoreShaderNode.js';
 import { AutosizeMode, Autosizer } from './Autosizer.js';
-import { removeChild, sortByZIndexStable } from './lib/collectionUtils.js';
+import { removeChild } from './lib/collectionUtils.js';
 
 export enum CoreNodeRenderState {
   Init = 0,
@@ -62,6 +62,11 @@ const NO_CLIPPING_RECT: RectWithValid = {
   h: 0,
   valid: false,
 };
+
+// Hoisted so `sortChildren` doesn't allocate a fresh comparator closure on
+// every z-index reorder.
+const compareZIndex = (a: CoreNode, b: CoreNode): number =>
+  a.props.zIndex - b.props.zIndex;
 
 const CoreNodeRenderStateMap: Map<CoreNodeRenderState, string> = new Map();
 CoreNodeRenderStateMap.set(CoreNodeRenderState.Init, 'init');
@@ -131,7 +136,6 @@ export enum UpdateType {
    * @remarks
    * CoreNode Properties Updated:
    * - `worldAlpha` = `parent.worldAlpha` * `alpha`
-   *   (or just `alpha` when `ignoreParentAlpha` is enabled)
    */
   WorldAlpha = 64,
 
@@ -246,29 +250,6 @@ export interface CoreNodeProps {
    * @default `1`
    */
   alpha: number;
-  /**
-   * When enabled, the Node's world alpha is computed from its own
-   * {@link alpha} only, ignoring the alpha inherited from its ancestors.
-   *
-   * @remarks
-   * Normally `worldAlpha = parent.worldAlpha * alpha`, so fading a parent
-   * fades every descendant with it. With `ignoreParentAlpha` enabled this
-   * Node keeps rendering at its own alpha while its parent (and the rest of
-   * the subtree) fades.
-   *
-   * Subtrees whose world alpha reaches exactly 0 are culled from rendering
-   * entirely, so this Node still disappears once an ancestor hits alpha 0 —
-   * the prop only has an effect while every ancestor's alpha is above 0.
-   * This keeps the fully-transparent subtree cull free of bookkeeping.
-   *
-   * Descendants of this Node inherit from its world alpha as usual.
-   *
-   * Has no effect inside a render-to-texture subtree: the RTT root's
-   * composited quad is still faded as a single unit by its own world alpha.
-   *
-   * @default `false`
-   */
-  ignoreParentAlpha: boolean;
   /**
    * Autosize
    *
@@ -428,6 +409,41 @@ export interface CoreNodeProps {
    * @default `0`
    */
   placeholderColor: number;
+  /**
+   * Placeholder image shown while the Node's texture is not yet loaded.
+   *
+   * @remarks
+   * Like {@link placeholderColor}, but renders an image instead of a solid
+   * rectangle while the Node's texture loads (and while a freed texture
+   * reloads, and after a permanent failure). The image is stretched to the
+   * Node's dimensions and renders through the Node's shader, so rounded
+   * corners and borders apply.
+   *
+   * The image is loaded once, shared by every Node using the same URL, and
+   * pinned in memory (`preventCleanup`) so it is always available — use a
+   * small number of distinct placeholder images (e.g. one per poster size),
+   * not per-item artwork.
+   *
+   * While the placeholder image itself is still loading, the Node falls back
+   * to {@link placeholderColor} if set, otherwise renders nothing. Once the
+   * placeholder image is showing it is rendered untinted; `placeholderColor`
+   * only colors the fallback rectangle.
+   *
+   * @default `null`
+   */
+  placeholderImage: string | null;
+
+  /**
+   * Fallback image shown when the node failed to load the primary texture.
+   *
+   * The image is loaded once, shared by every Node using the same URL, and
+   * pinned in memory (`preventCleanup`) so it is always available — use a
+   * small number of distinct placeholder images (e.g. one per poster size),
+   * not per-item artwork.
+   *
+   * @default `null`
+   */
+  fallbackImage: string | null;
   /**
    * The Node's parent Node.
    *
@@ -830,21 +846,47 @@ export class CoreNode extends EventEmitter {
   public textureLoaded = false;
 
   /**
-   * Last ownership value sent to the current texture via
-   * {@link updateTextureOwnership}. Per (node, texture) pair — must reset to
-   * `false` whenever the texture is swapped or released, or a stale `true`
-   * would skip the re-registration that triggers `Texture.load()`.
-   */
-  private textureOwnership = false;
-
-  /**
-   * True while this node should render its `placeholderColor` instead of its
-   * texture: `placeholderColor` is non-zero, a texture is set, and that
-   * texture is not loaded. Read by the renderers' quad path to substitute the
-   * stage's default (1x1 white) texture. Maintained by
+   * True while this node should render a placeholder instead of its texture:
+   * a texture is set, it is not loaded, and a placeholder is available
+   * (non-zero `placeholderColor`, or a loaded `placeholderImage`). Read by
+   * the renderers' quad path to substitute the placeholder texture — the
+   * loaded placeholder image, or the stage's default (1x1 white) texture
+   * tinted by `placeholderColor`. Maintained by
    * {@link updatePlaceholderActive} — never written elsewhere.
    */
   public placeholderActive = false;
+  public hasTextureFailed = false;
+
+  /**
+   * Shared, pinned (`preventCleanup`) texture for {@link placeholderImage},
+   * or `null`. Owned by the placeholderImage setter.
+   */
+  public placeholderTexture: Texture | null = null;
+
+  /**
+   * Cached `placeholderTexture.state === 'loaded'` (avoids per-quad string
+   * compares). Maintained by the placeholder texture event handlers.
+   */
+  public placeholderTextureLoaded = false;
+
+  /**
+   * True while the fallback texture is being shown: texture permanently
+   * failed AND the fallback image has loaded. Maintained by
+   * {@link updateFallbackActive} — never written elsewhere.
+   */
+  public fallbackActive = false;
+
+  /**
+   * Shared, pinned texture for {@link fallbackImage}, or `null`.
+   * Owned by the fallbackImage setter.
+   */
+  public fallbackTexture: Texture | null = null;
+
+  /**
+   * Cached `fallbackTexture.state === 'loaded'`. Maintained by the fallback
+   * texture event handlers.
+   */
+  public fallbackTextureLoaded = false;
 
   public updateType = UpdateType.All;
   public childUpdateType = UpdateType.None;
@@ -931,7 +973,16 @@ export class CoreNode extends EventEmitter {
     // creates a fresh object with a consistent shape.  Save fields that are
     // re-applied through setters, then null them on props so the setters
     // detect the change.
-    const { texture, shader, src, rtt, boundsMargin, parent } = props;
+    const {
+      texture,
+      shader,
+      src,
+      rtt,
+      boundsMargin,
+      parent,
+      placeholderImage,
+      fallbackImage,
+    } = props;
     const p = (this.props = props);
     p.texture = null;
     p.shader = null;
@@ -939,6 +990,8 @@ export class CoreNode extends EventEmitter {
     p.rtt = false;
     p.boundsMargin = null;
     p.scale = null;
+    p.placeholderImage = null;
+    p.fallbackImage = null;
 
     //check if any color props are set for premultiplied color updates
     if (
@@ -982,6 +1035,12 @@ export class CoreNode extends EventEmitter {
     if (src !== null) {
       this.src = src;
     }
+    if (placeholderImage !== null && placeholderImage !== undefined) {
+      this.placeholderImage = placeholderImage;
+    }
+    if (fallbackImage !== null && fallbackImage !== undefined) {
+      this.fallbackImage = fallbackImage;
+    }
     if (rtt !== false) {
       this.rtt = rtt;
     }
@@ -1019,9 +1078,10 @@ export class CoreNode extends EventEmitter {
    */
   private updatePlaceholderActive(): void {
     const active =
-      this.props.placeholderColor !== 0 &&
       this.props.texture !== null &&
-      this.textureLoaded === false;
+      this.textureLoaded === false &&
+      (this.props.placeholderColor !== 0 ||
+        this.placeholderTextureLoaded === true);
 
     if (active !== this.placeholderActive) {
       this.placeholderActive = active;
@@ -1030,6 +1090,163 @@ export class CoreNode extends EventEmitter {
       );
     }
   }
+
+  /**
+   * Assign or clear the shared placeholder image texture.
+   *
+   * @remarks
+   * The texture is pinned (`preventCleanup`) so the memory manager never
+   * frees it, and loaded eagerly with priority so it is available before the
+   * first poster needs it. Listeners stay attached for the lifetime of the
+   * assignment: `loaded`/`failed` drive the fallback state machine, and
+   * `freed` self-heals the rare out-of-band free (context loss, or another
+   * node's textureOptions unpinning the shared texture) by re-pinning and
+   * reloading. They are removed on swap and in {@link destroy} so a
+   * destroyed node does not leak via the long-lived texture.
+   */
+  private setPlaceholderTexture(value: Texture | null): void {
+    const old = this.placeholderTexture;
+    if (old === value) {
+      return;
+    }
+
+    if (old !== null) {
+      old.off('loaded', this.onPlaceholderTexLoaded);
+      old.off('failed', this.onPlaceholderTexFailed);
+      old.off('freed', this.onPlaceholderTexFreed);
+    }
+
+    this.placeholderTexture = value;
+    this.placeholderTextureLoaded = value !== null && value.state === 'loaded';
+
+    if (value !== null) {
+      value.preventCleanup = true;
+      value.on('loaded', this.onPlaceholderTexLoaded);
+      value.on('failed', this.onPlaceholderTexFailed);
+      value.on('freed', this.onPlaceholderTexFreed);
+
+      // Eager priority load. Only from idle states — 'loading'/'fetching'
+      // means another node already kicked it off and a duplicate call would
+      // start a second fetch of the same source.
+      const state = value.state;
+      if (state === 'initial' || state === 'freed') {
+        void this.stage.txManager.loadTexture(value, true);
+      }
+    }
+
+    this.updatePlaceholderActive();
+    // The shown placeholder may have changed shape (image <-> color rect)
+    // without toggling active.
+    if (this.placeholderActive === true) {
+      this.setUpdateType(UpdateType.PremultipliedColors);
+    }
+  }
+
+  private updateFallbackActive(): void {
+    const active =
+      this.hasTextureFailed === true && this.fallbackTextureLoaded === true;
+
+    if (active !== this.fallbackActive) {
+      this.fallbackActive = active;
+      this.setUpdateType(
+        UpdateType.PremultipliedColors | UpdateType.IsRenderable,
+      );
+    }
+  }
+
+  private setFallbackImageTexture(texture: Texture | null): void {
+    const old = this.fallbackTexture;
+    if (old === texture) {
+      return;
+    }
+
+    if (old !== null) {
+      old.off('loaded', this.onFallbackTexLoaded);
+      old.off('failed', this.onFallbackTexFailed);
+      old.off('freed', this.onFallbackTexFreed);
+    }
+
+    this.fallbackTexture = texture;
+    this.fallbackTextureLoaded = texture !== null && texture.state === 'loaded';
+
+    if (texture !== null) {
+      texture.preventCleanup = true;
+      texture.on('loaded', this.onFallbackTexLoaded);
+      texture.on('failed', this.onFallbackTexFailed);
+      texture.on('freed', this.onFallbackTexFreed);
+
+      const state = texture.state;
+      if (state === 'initial' || state === 'freed') {
+        console.log("failed texture, loading fallback texture");
+        void this.stage.txManager.loadTexture(texture, true);
+      }
+    }
+
+    this.updateFallbackActive();
+  }
+
+  private onFallbackTexLoaded: TextureLoadedEventHandler = () => {
+    this.fallbackTextureLoaded = true;
+    this.updateFallbackActive();
+    if (this.fallbackActive === true) {
+      this.setUpdateType(UpdateType.PremultipliedColors);
+      this.stage.requestRender();
+    }
+  };
+
+  private onFallbackTexFailed: TextureFailedEventHandler = () => {
+    this.fallbackTextureLoaded = false;
+    this.updateFallbackActive();
+  };
+
+  private onFallbackTexFreed: TextureFreedEventHandler = () => {
+    this.fallbackTextureLoaded = false;
+    this.updateFallbackActive();
+
+    const texture = this.fallbackTexture;
+    if (texture !== null && texture.state === 'freed') {
+      texture.preventCleanup = true;
+      console.log('loading fallback texture');
+      void this.stage.txManager.loadTexture(texture, true);
+    }
+  };
+
+  private onPlaceholderTexLoaded: TextureLoadedEventHandler = () => {
+    this.placeholderTextureLoaded = true;
+    this.updatePlaceholderActive();
+    if (this.placeholderActive === true) {
+      // Switch from the color-rect fallback to the image: vertex colors go
+      // to untinted white and the quad's texture changes.
+      this.setUpdateType(UpdateType.PremultipliedColors);
+      // The RAF loop may have stopped while the placeholder loaded.
+      this.stage.requestRender();
+    }
+  };
+
+  private onPlaceholderTexFailed: TextureFailedEventHandler = () => {
+    this.placeholderTextureLoaded = false;
+    this.updatePlaceholderActive();
+    if (this.placeholderActive === true) {
+      this.setUpdateType(UpdateType.PremultipliedColors);
+    }
+  };
+
+  private onPlaceholderTexFreed: TextureFreedEventHandler = () => {
+    this.placeholderTextureLoaded = false;
+    this.updatePlaceholderActive();
+    if (this.placeholderActive === true) {
+      this.setUpdateType(UpdateType.PremultipliedColors);
+    }
+
+    // A pinned texture was freed out-of-band — re-pin and reload. The state
+    // guard makes only the first notified node start the reload; the rest
+    // see 'loading'.
+    const texture = this.placeholderTexture;
+    if (texture !== null && texture.state === 'freed') {
+      texture.preventCleanup = true;
+      void this.stage.txManager.loadTexture(texture, true);
+    }
+  };
 
   loadTexture(): void {
     if (this.props.texture === null) {
@@ -1093,7 +1310,6 @@ export class CoreNode extends EventEmitter {
     texture.off('failed', this.onTextureFailed);
     texture.off('freed', this.onTextureFreed);
     texture.setRenderableOwner(this._id, false);
-    this.textureOwnership = false;
   }
 
   protected onTextureLoaded: TextureLoadedEventHandler = (_, dimensions) => {
@@ -1155,6 +1371,8 @@ export class CoreNode extends EventEmitter {
       this.texture !== null &&
       this.texture.retryCount > this.texture.maxRetryCount
     ) {
+      this.hasTextureFailed = true;
+      this.updateFallbackActive();
       this.emit('failed', {
         type: 'texture',
         error,
@@ -1481,10 +1699,7 @@ export class CoreNode extends EventEmitter {
     }
 
     if (updateType & UpdateType.WorldAlpha) {
-      this.worldAlpha =
-        props.ignoreParentAlpha === true
-          ? props.alpha
-          : parent.worldAlpha * props.alpha;
+      this.worldAlpha = parent.worldAlpha * this.props.alpha;
       updateType |=
         UpdateType.PremultipliedColors |
         UpdateType.Children |
@@ -1515,11 +1730,24 @@ export class CoreNode extends EventEmitter {
     if (updateType & UpdateType.PremultipliedColors) {
       const alpha = this.worldAlpha;
 
-      if (this.placeholderActive === true) {
-        // Placeholder rendering: all four corners take the placeholder color.
-        // The quad samples the stage's default 1x1 white texture, so this is
-        // exactly the color-rect path.
-        const merged = premultiplyColorABGR(props.placeholderColor, alpha);
+      if (this.fallbackActive === true) {
+        // Fallback image: render untinted white so the image shows through.
+        const merged = premultiplyColorABGR(0xffffffff, alpha);
+        this.premultipliedColorTl =
+          this.premultipliedColorTr =
+          this.premultipliedColorBl =
+          this.premultipliedColorBr =
+            merged;
+      } else if (this.placeholderActive === true) {
+        // Placeholder rendering: all four corners take the same color. With
+        // the placeholder image loaded, the image renders untinted (white);
+        // otherwise the quad samples the stage's default 1x1 white texture
+        // tinted by placeholderColor — exactly the color-rect path.
+        const color =
+          this.placeholderTextureLoaded === true
+            ? 0xffffffff
+            : props.placeholderColor;
+        const merged = premultiplyColorABGR(color, alpha);
         this.premultipliedColorTl =
           this.premultipliedColorTr =
           this.premultipliedColorBl =
@@ -1862,21 +2090,19 @@ export class CoreNode extends EventEmitter {
       // and will prevent further checks until the texture is reloaded or retry is reset on the texture
       if (this.texture.retryCount > this.texture.maxRetryCount) {
         // texture has failed to load, we cannot render the texture itself —
-        // but a placeholder color still renders in its place
+        // but a placeholder or fallback still renders in its place
         this.updateTextureOwnership(false);
-        this.setRenderable(
-          this.placeholderActive === true &&
-            (this.stage.renderOnlyInViewport === false ||
-              this.renderState === CoreNodeRenderState.InViewport),
-        );
+        this.setRenderable(this.placeholderActive || this.fallbackActive);
         return;
       }
 
       needsTextureOwnership = true;
       // Use cached boolean instead of string comparison; a placeholder
-      // renders while the texture is loading
+      // renders while the texture is loading; fallback if permanently failed
       newIsRenderable =
-        this.textureLoaded === true || this.placeholderActive === true;
+        this.textureLoaded === true ||
+        this.placeholderActive === true ||
+        this.fallbackActive === true;
     } else if (
       // check shader
       (this.props.shader !== this.stage.renderer.getDefaultShaderNode() ||
@@ -1886,17 +2112,6 @@ export class CoreNode extends EventEmitter {
     ) {
       // This mean we have dimensions and a color set, so we can render a ColorTexture
       newIsRenderable = true;
-    }
-
-    // renderOnlyInViewport: nodes in the preload margin keep texture
-    // ownership above (so loading proceeds) but stay out of the render list
-    // until they actually intersect the viewport.
-    if (
-      newIsRenderable === true &&
-      this.stage.renderOnlyInViewport === true &&
-      this.renderState !== CoreNodeRenderState.InViewport
-    ) {
-      newIsRenderable = false;
     }
 
     this.updateTextureOwnership(needsTextureOwnership);
@@ -1927,10 +2142,6 @@ export class CoreNode extends EventEmitter {
    * Changes the renderable state of the node.
    */
   updateTextureOwnership(isRenderable: boolean) {
-    if (this.textureOwnership === isRenderable) {
-      return;
-    }
-    this.textureOwnership = isRenderable;
     this.texture?.setRenderableOwner(this._id, isRenderable);
   }
 
@@ -2135,6 +2346,11 @@ export class CoreNode extends EventEmitter {
 
     this.removeAllListeners();
     this.unloadTexture();
+    // Detach from the long-lived, shared placeholder texture so it does not
+    // retain this node's handlers (the texture itself stays pinned/cached).
+    this.setPlaceholderTexture(null);
+    // Detach from the long-lived, shared fallback texture.
+    this.setFallbackImageTexture(null);
     this.isRenderable = false;
 
     if (this.hasShaderTimeFn === true) {
@@ -2178,7 +2394,13 @@ export class CoreNode extends EventEmitter {
   }
 
   get renderTexture(): Texture | null {
+    if (this.fallbackActive === true) {
+      return this.fallbackTexture;
+    }
     if (this.placeholderActive === true) {
+      if (this.placeholderTextureLoaded === true) {
+        return this.placeholderTexture;
+      }
       return this.stage.defaultTexture;
     }
     return this.props.texture || this.stage.defaultTexture;
@@ -2215,7 +2437,7 @@ export class CoreNode extends EventEmitter {
   }
 
   sortChildren() {
-    sortByZIndexStable(this.children);
+    this.children.sort(compareZIndex);
     this.stage.requestRenderListUpdate();
   }
 
@@ -2558,24 +2780,6 @@ export class CoreNode extends EventEmitter {
     this.childUpdateType |= UpdateType.WorldAlpha;
   }
 
-  get ignoreParentAlpha(): boolean {
-    return this.props.ignoreParentAlpha;
-  }
-
-  set ignoreParentAlpha(value: boolean) {
-    if (this.props.ignoreParentAlpha === value) {
-      return;
-    }
-    this.props.ignoreParentAlpha = value;
-    this.setUpdateType(
-      UpdateType.PremultipliedColors |
-        UpdateType.WorldAlpha |
-        UpdateType.Children |
-        UpdateType.IsRenderable,
-    );
-    this.childUpdateType |= UpdateType.WorldAlpha;
-  }
-
   get autosize(): boolean {
     return this.props.autosize;
   }
@@ -2684,6 +2888,50 @@ export class CoreNode extends EventEmitter {
     if (this.placeholderActive === true) {
       this.setUpdateType(UpdateType.PremultipliedColors);
     }
+  }
+
+  get placeholderImage(): string | null {
+    return this.props.placeholderImage;
+  }
+
+  set placeholderImage(value: string | null) {
+    const p = this.props;
+    if (p.placeholderImage === value) return;
+
+    p.placeholderImage = value;
+
+    if (value === null) {
+      this.setPlaceholderTexture(null);
+      return;
+    }
+
+    // src-only props: every node using the same URL — regardless of node
+    // dimensions — resolves to the same cached, shared texture instance.
+    this.setPlaceholderTexture(
+      this.stage.txManager.createTexture('ImageTexture', { src: value }),
+    );
+  }
+
+  get fallbackImage() {
+    return this.props.fallbackImage;
+  }
+
+  set fallbackImage(value: string | null) {
+    const p = this.props;
+    if (p.fallbackImage === value) return;
+
+    p.fallbackImage = value;
+
+    if (value === null) {
+      this.setFallbackImageTexture(null);
+      return;
+    }
+
+    // src-only props: every node using the same URL — regardless of node
+    // dimensions — resolves to the same cached, shared texture instance.
+    this.setFallbackImageTexture(
+      this.stage.txManager.createTexture('ImageTexture', { src: value }),
+    );
   }
 
   get colorTop(): number {
@@ -3106,6 +3354,10 @@ export class CoreNode extends EventEmitter {
     this.textureCoords = undefined;
     this.props.texture = value;
     this.textureLoaded = value !== null && value.state === 'loaded';
+    if (value !== null && this.hasTextureFailed === true) {
+      this.hasTextureFailed = false;
+      this.updateFallbackActive();
+    }
     this.updatePlaceholderActive();
 
     if (value !== null) {
@@ -3113,7 +3365,6 @@ export class CoreNode extends EventEmitter {
         this.autosizer.setMode(AutosizeMode.Texture); // Set to texture size mode
       }
       value.setRenderableOwner(this._id, this.isRenderable);
-      this.textureOwnership = this.isRenderable;
       this.loadTexture();
     }
 
