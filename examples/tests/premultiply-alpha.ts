@@ -36,22 +36,6 @@ export default async function test({ renderer, testRoot }: ExampleSettings) {
     parent: testRoot,
   });
 
-  // Surface what the startup probe detected on this device, if reachable.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const honored = (renderer as any).stage?.txManager?.imageBitmapSupported
-    ?.premultiplyHonored;
-  renderer.createTextNode({
-    text: `Device probe: createImageBitmap premultiplyAlpha honored: ${String(
-      honored,
-    )}`,
-    fontFamily: 'Ubuntu',
-    fontSize: 26,
-    color: 0xffff00ff,
-    x: PADDING,
-    y: PADDING + 40,
-    parent: testRoot,
-  });
-
   const sizeToTexture: NodeLoadedEventHandler = (target, payload) => {
     const { w, h } = payload.dimensions;
     target.w = w;

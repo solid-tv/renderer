@@ -225,10 +225,12 @@ export class ImageTexture extends Texture {
     ) {
       // basic createImageBitmap without options or crop
       // this is supported for Chrome v50 to v52/54 that doesn't support options.
-      // The browser default premultiplies, so WebGL must not premultiply again.
+      // The browser default premultiplies, so WebGL must not premultiply again —
+      // except on devices whose default returns straight alpha
+      // (premultiplyAlphaHonored: false); there WebGL premultiplies on upload.
       return {
         data: await this.platform.createImageBitmap(blob),
-        premultiplyAlpha: false,
+        premultiplyAlpha: useGlPremultiply,
       };
     }
 

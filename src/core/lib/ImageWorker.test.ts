@@ -103,4 +103,23 @@ describe('ImageWorkerManager pool spawning', () => {
     load(mgr);
     expect(FakeWorker.instances[0]!.postMessage).toHaveBeenCalledTimes(1);
   });
+
+  it('sends createImageBitmap capability flags as message data, not baked into the worker source', () => {
+    // Regression test: capability flags used to be injected by pattern-matching
+    // `createImageWorker.toString()` against literal variable-name strings and
+    // rewriting them. That silently breaks under any minifier that renames
+    // locals (guaranteed in a real production bundle) - the worker would be
+    // permanently stuck on hardcoded defaults regardless of actual device
+    // support. Flags must instead travel as plain postMessage data, which
+    // survives minification untouched.
+    const mgr = new ImageWorkerManager(1, support);
+    load(mgr);
+    expect(FakeWorker.instances[0]!.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        supportsOptionsCreateImageBitmap: support.options,
+        supportsFullCreateImageBitmap: support.full,
+        premultiplyAlphaHonored: support.premultiplyHonored,
+      }),
+    );
+  });
 });
