@@ -482,6 +482,26 @@ export type RendererMainSettings = RendererRuntimeSettings & {
   numImageWorkers: number;
 
   /**
+   * Maximum number of image fetch+decode operations allowed to run at once
+   * when image workers are unavailable
+   *
+   * @remarks
+   * Only applies when there is no image worker manager (i.e.
+   * `numImageWorkers === 0`, or workers/`createImageBitmap` are unsupported).
+   * In that mode every image decode runs on the main thread, so a burst — such
+   * as a scroll that makes many image nodes renderable in a single tick — can
+   * fire dozens of decodes back-to-back and starve the render loop. This caps
+   * how many run concurrently; on-screen (priority) textures bypass the cap so
+   * they never wait behind off-screen prefetch.
+   *
+   * Has no effect when image workers are active — the worker pool already
+   * bounds concurrency by its size. Set to `0` to disable the cap (unbounded).
+   *
+   * @defaultValue `4`
+   */
+  imageDecodeConcurrency: number;
+
+  /**
    * Renderer Engine
    *
    * @remarks
@@ -610,13 +630,17 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    * - Full - Supports createImageBitmap(image, sx, sy, sw, sh, options)
    *
    * Note with auto detection, the renderer will attempt to use the most advanced
-   * version of the API available. If the API is not available, the renderer will
-   * fall back to the next available version.
+   * version of the API available. If the API is not available (e.g. Chrome < 50,
+   * including the Chrome 38 support floor), the renderer falls back to loading
+   * images via `new Image()`.
    *
-   * This will affect startup performance as the renderer will need to determine
-   * the supported version of the API.
+   * `'auto'` runs a small startup probe (a 1x1 PNG) to determine support; this
+   * adds a negligible one-time startup cost. Set an explicit value (`'full'`,
+   * `'options'`, `'basic'`) to skip the probe ONLY when the target runtime is
+   * known to support that level — forcing a level the runtime lacks will fail
+   * to load images. When in doubt, use `'auto'`.
    *
-   * @defaultValue `full`
+   * @defaultValue `auto`
    */
   createImageBitmapSupport: 'auto' | 'basic' | 'options' | 'full';
 
@@ -781,6 +805,10 @@ export class RendererMain extends EventEmitter {
       textLayoutCacheSize: settings.textLayoutCacheSize ?? 250,
       numImageWorkers:
         settings.numImageWorkers !== undefined ? settings.numImageWorkers : 2,
+      imageDecodeConcurrency:
+        settings.imageDecodeConcurrency !== undefined
+          ? settings.imageDecodeConcurrency
+          : 4,
       enableContextSpy: settings.enableContextSpy ?? false,
       forceWebGL2: settings.forceWebGL2 ?? false,
       disableVertexArrayObject: settings.disableVertexArrayObject ?? false,
@@ -792,7 +820,7 @@ export class RendererMain extends EventEmitter {
       textBaselineMode: settings.textBaselineMode ?? 'optical',
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
-      createImageBitmapSupport: settings.createImageBitmapSupport || 'full',
+      createImageBitmapSupport: settings.createImageBitmapSupport || 'auto',
       // undefined -> true (assume honored, no probe); 'auto' -> probe;
       // explicit boolean -> force the value.
       premultiplyAlphaHonored:
@@ -854,6 +882,7 @@ export class RendererMain extends EventEmitter {
       fpsUpdateInterval: settings.fpsUpdateInterval!,
       enableClear: settings.enableClear!,
       numImageWorkers: settings.numImageWorkers!,
+      imageDecodeConcurrency: settings.imageDecodeConcurrency!,
       renderEngine: settings.renderEngine!,
       textureMemory: resolvedTxSettings,
       eventBus: this,

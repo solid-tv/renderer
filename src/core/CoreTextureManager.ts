@@ -6,6 +6,7 @@ import { NoiseTexture } from './textures/NoiseTexture.js';
 import { SubTexture } from './textures/SubTexture.js';
 import { RenderTexture } from './textures/RenderTexture.js';
 import { Texture, TextureType } from './textures/Texture.js';
+import type { TextureData } from './textures/Texture.js';
 import { EventEmitter } from '../common/EventEmitter.js';
 import type { Stage } from './Stage.js';
 import {
@@ -51,6 +52,10 @@ export interface TextureManagerSettings {
   // 'auto' = detect via probe; boolean = force the value and skip the probe.
   premultiplyAlphaHonored: boolean | 'auto';
   maxRetryCount: number;
+  // Upper bound on concurrent main-thread fetch+decode operations when no
+  // image worker manager exists (numImageWorkers === 0). See CoreTextureManager
+  // for how the gate is applied. `0` disables the gate (unbounded).
+  imageDecodeConcurrency: number;
 }
 
 export type ResizeModeOptions =
@@ -230,6 +235,49 @@ class TextureUploadQueue {
   }
 }
 
+/**
+ * Bounds how many async operations run concurrently.
+ *
+ * Used to cap main-thread fetch+decode (`getTextureData`) when there are no
+ * image workers: on such devices every `createImageBitmap`/decode runs on the
+ * main thread, so a scroll that makes dozens of image nodes renderable at once
+ * would otherwise fire dozens of decodes back-to-back and starve the render
+ * loop. A caller `await`s {@link acquire} before the work and calls
+ * {@link release} in a `finally` after it.
+ *
+ * The in-flight slot is handed straight from a releaser to the next waiter, so
+ * the active count never dips below `limit` while work is pending.
+ *
+ * Exported for unit testing; not part of the public renderer surface.
+ */
+export class ConcurrencyGate {
+  private inFlight = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly limit: number) {}
+
+  acquire(): Promise<void> {
+    if (this.inFlight < this.limit) {
+      this.inFlight++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  release(): void {
+    const next = this.waiters.shift();
+    if (next !== undefined) {
+      // Transfer the slot to the next waiter without touching the count —
+      // one operation left, one is starting, so `inFlight` is unchanged.
+      next();
+      return;
+    }
+    this.inFlight--;
+  }
+}
+
 export class CoreTextureManager extends EventEmitter {
   /**
    * Map of textures by cache key
@@ -246,6 +294,13 @@ export class CoreTextureManager extends EventEmitter {
   private initialized = false;
   private stage: Stage;
   private numImageWorkers: number;
+  private imageDecodeConcurrency: number;
+  /**
+   * Caps concurrent main-thread fetch+decode. Non-null only when there is no
+   * image worker manager (workers already bound concurrency by pool size).
+   * Assigned in {@link initialize} once worker availability is known.
+   */
+  private decodeGate: ConcurrencyGate | null = null;
 
   public platform: Platform;
 
@@ -291,12 +346,14 @@ export class CoreTextureManager extends EventEmitter {
       createImageBitmapSupport,
       premultiplyAlphaHonored,
       maxRetryCount,
+      imageDecodeConcurrency,
     } = settings;
 
     this.stage = stage;
     this.platform = stage.platform;
     this.numImageWorkers = numImageWorkers;
     this.maxRetryCount = maxRetryCount;
+    this.imageDecodeConcurrency = imageDecodeConcurrency;
 
     if (createImageBitmapSupport === 'auto') {
       validateCreateImageBitmap(this.platform)
@@ -404,6 +461,23 @@ export class CoreTextureManager extends EventEmitter {
       );
     }
 
+    // Without an image worker manager, every fetch+decode runs on the main
+    // thread. Bound how many run at once so a burst (e.g. a scroll that makes
+    // many image nodes renderable in one tick) can't serialize dozens of
+    // decodes and starve the render loop. With workers, the pool already caps
+    // concurrency, so the gate stays null (no main-thread ceiling needed).
+    //
+    // Scope: this bounds the `createImageBitmap` decode, which happens inside
+    // `getTextureData` (see `loadTexture`). On the `<img>` fallback path
+    // (`hasCreateImageBitmap === false`) the image decodes lazily and the real
+    // main-thread cost is the synchronous `texImage2D` at upload, which the
+    // gate does not cover — the per-frame upload budget (`processUntil`) paces
+    // that instead. The gate is therefore most effective on the
+    // createImageBitmap(-polyfill) path.
+    if (this.imageWorkerManager === null && this.imageDecodeConcurrency > 0) {
+      this.decodeGate = new ConcurrencyGate(this.imageDecodeConcurrency);
+    }
+
     this.initialized = true;
     this.emit('initialized');
 
@@ -494,15 +568,30 @@ export class CoreTextureManager extends EventEmitter {
 
     texture.setState('loading');
 
+    // Bound concurrent main-thread fetch+decode. Priority (on-screen) textures
+    // bypass the gate so they never wait behind off-screen prefetch decodes.
+    // `decodeGate` is null when image workers handle decoding off-thread.
+    const gate = priority === true ? null : this.decodeGate;
+    if (gate !== null) {
+      await gate.acquire();
+    }
+
     // Get texture data - early return on failure
-    const textureDataResult = await texture.getTextureData().catch((err) => {
-      console.error(err);
-      texture.setState(
-        'failed',
-        new TextureError(TextureErrorCode.TEXTURE_DATA_NULL),
-      );
-      return null;
-    });
+    let textureDataResult: TextureData | null;
+    try {
+      textureDataResult = await texture.getTextureData().catch((err) => {
+        console.error(err);
+        texture.setState(
+          'failed',
+          new TextureError(TextureErrorCode.TEXTURE_DATA_NULL),
+        );
+        return null;
+      });
+    } finally {
+      if (gate !== null) {
+        gate.release();
+      }
+    }
 
     // Early return if texture data fetch failed
     if (textureDataResult === null || texture.state === 'failed') {
