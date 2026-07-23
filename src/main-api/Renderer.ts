@@ -654,12 +654,16 @@ export type RendererMainSettings = RendererRuntimeSettings & {
    * ignore it, returning straight (non-premultiplied) alpha. This causes edge
    * "ghosting" on images with transparency.
    *
-   * Set to `'auto'` to detect via a cheap startup probe (one 1×1 texture
-   * upload + framebuffer readback). Set to a boolean to force the value. Leave
-   * unset to assume the option is honored — the default, which preserves
-   * existing behavior with no probe overhead.
+   * `'auto'` (the default) detects via a cheap startup probe (one 1×1 PNG
+   * decode + texture upload + framebuffer readback). On devices that honor the
+   * option — the vast majority — the probe returns `true` and behavior is
+   * identical to assuming it honored; only devices that actually ignore it
+   * (e.g. the Movistar STB) switch to the WebGL-side premultiply fallback, so
+   * the change is invisible everywhere it isn't needed. Set to a boolean to
+   * force the value and skip the probe (`false` forces the GL-premultiply
+   * fallback; `true` skips it).
    *
-   * @defaultValue `true` (assume honored; no probe)
+   * @defaultValue `'auto'` (probe once at startup)
    */
   premultiplyAlphaHonored?: boolean | 'auto';
 
@@ -821,11 +825,11 @@ export class RendererMain extends EventEmitter {
       textureProcessingTimeLimit: settings.textureProcessingTimeLimit || 10,
       canvas: settings.canvas,
       createImageBitmapSupport: settings.createImageBitmapSupport || 'auto',
-      // undefined -> true (assume honored, no probe); 'auto' -> probe;
-      // explicit boolean -> force the value.
+      // undefined -> 'auto' (probe once at startup); 'auto' -> probe;
+      // explicit boolean -> force the value, skip the probe.
       premultiplyAlphaHonored:
         settings.premultiplyAlphaHonored === undefined
-          ? true
+          ? 'auto'
           : settings.premultiplyAlphaHonored,
       platform: settings.platform || null,
       maxRetryCount: settings.maxRetryCount ?? 5,

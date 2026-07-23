@@ -43,7 +43,7 @@ function createImageWorker() {
     options: {
       supportsOptionsCreateImageBitmap: boolean;
       supportsFullCreateImageBitmap: boolean;
-      premultiplyAlphaHonored: boolean;
+      premultiplyAlphaHonored: boolean | null;
     },
   ): Promise<getImageReturn> {
     return new Promise(function (resolve, reject) {
@@ -108,10 +108,12 @@ function createImageWorker() {
         ) {
           // Fallback for browsers that do not support createImageBitmap with options
           // this is supported for Chrome v50 to v52/54 that doesn't support options.
-          // The browser default premultiplies, so WebGL must not premultiply again.
+          // The browser default premultiplies, so WebGL must not premultiply again —
+          // except on devices whose default returns straight alpha
+          // (premultiplyAlphaHonored: false); there WebGL premultiplies on upload.
           createImageBitmap(blob)
             .then(function (data) {
-              resolve({ data: data, premultiplyAlpha: false });
+              resolve({ data: data, premultiplyAlpha: useGlPremultiply });
             })
             .catch(function (error) {
               reject(error);
@@ -150,11 +152,18 @@ function createImageWorker() {
     var width = event.data.sw;
     var height = event.data.sh;
 
-    // these will be set to true if the browser supports the createImageBitmap options or full
-    var supportsOptionsCreateImageBitmap = false;
-    var supportsFullCreateImageBitmap = false;
-    // set to false when the device is known to ignore the premultiply option
-    var premultiplyAlphaHonored = true;
+    // Capability flags are sent as message DATA (not baked into the worker's
+    // source text) because they must survive minification: a production
+    // bundler renames these local variable names, which silently breaks any
+    // scheme that pattern-matches `createImageWorker.toString()` output for
+    // injection (see git history for the string-replace approach this
+    // replaced, and the bug it caused - capability detection was always a
+    // no-op in a minified build, regardless of device or config).
+    var supportsOptionsCreateImageBitmap =
+      event.data.supportsOptionsCreateImageBitmap;
+    var supportsFullCreateImageBitmap =
+      event.data.supportsFullCreateImageBitmap;
+    var premultiplyAlphaHonored = event.data.premultiplyAlphaHonored;
 
     getImage(src, premultiplyAlpha, x, y, width, height, {
       supportsOptionsCreateImageBitmap,
@@ -199,7 +208,7 @@ export class ImageWorkerManager {
     if (this.workers.length > 0) {
       return;
     }
-    this.workerBlob = this.createWorkerBlob(this.createImageBitmapSupport);
+    this.workerBlob = this.createWorkerBlob();
     for (let i = 0; i < this.maxWorkers; i++) {
       this.spawnWorker();
     }
@@ -243,38 +252,18 @@ export class ImageWorkerManager {
     this.workerLoad[workerIndex] = 0;
   }
 
-  private createWorkerBlob(
-    createImageBitmapSupport: CreateImageBitmapSupport,
-  ): Blob {
+  private createWorkerBlob(): Blob {
+    // Capability flags (options/full/premultiplyHonored) are NOT injected
+    // into this source text. An earlier version pattern-matched
+    // `createImageWorker.toString()` against literal variable-name strings
+    // (e.g. 'var supportsOptionsCreateImageBitmap = false;') and rewrote
+    // them - this silently breaks under any minifier that renames locals
+    // (guaranteed in a real production bundle), permanently freezing every
+    // device on the hardcoded defaults regardless of actual support. The
+    // flags are sent per-request as postMessage data instead (see
+    // `getImage` below and `self.onmessage` above) - plain data survives
+    // minification untouched.
     let workerCode = `(${createImageWorker.toString()})()`;
-
-    // Replace placeholders with actual initialization values
-    if (createImageBitmapSupport.options === true) {
-      workerCode = workerCode.replace(
-        'var supportsOptionsCreateImageBitmap = false;',
-        'var supportsOptionsCreateImageBitmap = true;',
-      );
-    }
-
-    if (createImageBitmapSupport.full === true) {
-      workerCode = workerCode.replace(
-        'var supportsOptionsCreateImageBitmap = false;',
-        'var supportsOptionsCreateImageBitmap = true;',
-      );
-
-      workerCode = workerCode.replace(
-        'var supportsFullCreateImageBitmap = false;',
-        'var supportsFullCreateImageBitmap = true;',
-      );
-    }
-
-    if (createImageBitmapSupport.premultiplyHonored !== true) {
-      workerCode = workerCode.replace(
-        'var premultiplyAlphaHonored = true;',
-        'var premultiplyAlphaHonored = false;',
-      );
-    }
-
     workerCode = workerCode.replace('"use strict";', '');
     return new Blob([workerCode], {
       type: 'application/javascript',
@@ -368,6 +357,11 @@ export class ImageWorkerManager {
           sy,
           sw,
           sh,
+          supportsOptionsCreateImageBitmap:
+            this.createImageBitmapSupport.options,
+          supportsFullCreateImageBitmap: this.createImageBitmapSupport.full,
+          premultiplyAlphaHonored:
+            this.createImageBitmapSupport.premultiplyHonored,
         });
       } catch (error) {
         reject(error);

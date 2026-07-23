@@ -95,34 +95,52 @@ export async function validateCreateImageBitmap(
   return support;
 }
 
+// 1x1 PNG, color type 6 (RGBA), single pixel = (255, 0, 0, 128) in straight
+// (un-premultiplied) alpha. Decoding this real PNG blob exercises the same
+// image-decode pipeline that actual textures use — which on embedded WebKit
+// forks can honor `premultiplyAlpha` differently from the raw
+// ImageData->createImageBitmap path (some decoders ignore the option on the
+// PNG path while honoring it for ImageData). Detecting via the path real
+// images take is what makes this correct on devices like the Movistar STB.
+// prettier-ignore
+const STRAIGHT_ALPHA_TEST_PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+  0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xd0,
+  0x00, 0x00, 0x04, 0x81, 0x01, 0x80, 0x2c, 0x55, 0xce, 0xb0, 0x00, 0x00,
+  0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+]);
+
 /**
  * Determine whether `createImageBitmap(..., { premultiplyAlpha: 'premultiply' })`
  * is actually honored by this browser.
  *
- * Strategy: feed a known straight-alpha pixel (255, 0, 0, 128) through
- * createImageBitmap with 'premultiply', upload it to a WebGL texture with
- * GL-side premultiply DISABLED (so we observe the bitmap's own state), then
- * read the raw texel back via a framebuffer.
+ * Strategy: decode a known straight-alpha pixel (255, 0, 0, 128) delivered as
+ * a real PNG blob through createImageBitmap with 'premultiply', upload it to a
+ * WebGL texture with GL-side premultiply DISABLED (so we observe the bitmap's
+ * own state), then read the raw texel back via a framebuffer.
  *
  *  - honored   -> red comes back premultiplied (~128)
- *  - ignored   -> red comes back straight (~255)  [older Safari/WebKit]
+ *  - ignored   -> red comes back straight (~255)  [older Safari/WebKit,
+ *                 Movistar-class embedded STBs]
+ *
+ * A real PNG blob (not ImageData) is used deliberately: it matches the code
+ * path real textures take, and some embedded devices don't even support
+ * ImageData->createImageBitmap (the old ImageData probe returned null there,
+ * silently disabling detection on exactly the devices that needed it).
  *
  * @returns true if honored, false if ignored, null if it couldn't be measured
- * (no WebGL, createImageBitmap from ImageData unsupported, framebuffer
- * incomplete, etc.) — caller should treat null as "unknown".
+ * (no WebGL, createImageBitmap unsupported, framebuffer incomplete, etc.) —
+ * caller should treat null as "unknown".
  */
 export async function detectPremultiplyAlphaHonored(
   platform: Platform,
 ): Promise<boolean | null> {
   let bitmap: ImageBitmap;
   try {
-    // Straight (un-premultiplied) RGBA. ImageData is straight-alpha by spec.
-    const imageData = new ImageData(
-      new Uint8ClampedArray([255, 0, 0, 128]),
-      1,
-      1,
-    );
-    bitmap = await platform.createImageBitmap(imageData, {
+    const blob = new Blob([STRAIGHT_ALPHA_TEST_PNG], { type: 'image/png' });
+    bitmap = await platform.createImageBitmap(blob, {
       premultiplyAlpha: 'premultiply',
       colorSpaceConversion: 'none',
       imageOrientation: 'none',

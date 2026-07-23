@@ -65,26 +65,33 @@ function createPlatform(gl: object | null): Platform {
 
 describe('detectPremultiplyAlphaHonored', () => {
   beforeEach(() => {
-    // node test env has no ImageData global; the probe constructs one.
-    (globalThis as unknown as { ImageData: unknown }).ImageData = class {
-      data: Uint8ClampedArray;
-      width: number;
-      height: number;
-      constructor(data: Uint8ClampedArray, width: number, height: number) {
-        this.data = data;
-        this.width = width;
-        this.height = height;
+    // The probe decodes a real PNG blob (not ImageData), so node's missing
+    // Blob global must be stubbed. It just needs to be constructible and
+    // preserve the mime type the probe tags it with.
+    (globalThis as unknown as { Blob: unknown }).Blob = class {
+      constructor(public parts: unknown[], public opts: { type?: string }) {}
+      get type() {
+        return this.opts?.type ?? '';
       }
     };
   });
 
   afterEach(() => {
-    delete (globalThis as unknown as { ImageData?: unknown }).ImageData;
+    delete (globalThis as unknown as { Blob?: unknown }).Blob;
   });
 
   it('returns true when the bitmap reads back premultiplied (~128)', async () => {
     const platform = createPlatform(createFakeGl(128));
     expect(await detectPremultiplyAlphaHonored(platform)).toBe(true);
+  });
+
+  it('decodes a real PNG blob with the premultiply option (the path real textures take)', async () => {
+    const platform = createPlatform(createFakeGl(128));
+    await detectPremultiplyAlphaHonored(platform);
+    const call = (platform.createImageBitmap as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect((call![0] as { type: string }).type).toBe('image/png');
+    expect(call![1]).toMatchObject({ premultiplyAlpha: 'premultiply' });
   });
 
   it('returns false when the bitmap reads back straight (~255)', async () => {
